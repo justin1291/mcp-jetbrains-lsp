@@ -50,6 +50,13 @@ intellijPlatform {
             - Get hover information
         """.trimIndent()
     }
+
+    pluginVerification {
+        ides {
+            ide("IC-2024.3")
+            ide("IC-2025.1")
+        }
+    }
 }
 
 tasks {
@@ -59,7 +66,7 @@ tasks {
         targetCompatibility = "21"
     }
 
-    test {
+test {
         // Use JUnit Platform (JUnit 5)
         useJUnitPlatform()
 
