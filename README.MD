@@ -15,8 +15,8 @@ This plugin provides MCP tools that expose IntelliJ's powerful code analysis fea
 ### From Source
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-language-service
-cd mcp-language-service
+git clone https://github.com/yourusername/mcp-idea-lsp
+cd mcp-idea-lsp
 
 # Build the plugin
 ./gradlew buildPlugin
@@ -186,6 +186,34 @@ Get type information and documentation for a symbol at a position.
 ./gradlew runIde
 ```
 
+### Creating a Release
+
+This project uses [Release Please](https://github.com/googleapis/release-please) for automated releases.
+
+**How it works:**
+1. Use [Conventional Commits](https://www.conventionalcommits.org/) in your commit messages:
+   - `fix:` for bug fixes (creates a patch release)
+   - `feat:` for new features (creates a minor release)
+   - `feat!:` or `BREAKING CHANGE:` for breaking changes (creates a major release)
+   - `chore:`, `docs:`, `style:`, `refactor:`, `test:` don't trigger releases
+
+2. Release Please automatically:
+   - Creates/updates a PR with version bumps and changelog
+   - When you merge that PR, it creates a GitHub release
+   - Uploads the plugin ZIP to the release
+
+**Example commits:**
+```bash
+# Bug fix (1.0.0 → 1.0.1)
+git commit -m "fix: handle null PSI elements in symbol extraction"
+
+# New feature (1.0.1 → 1.1.0)
+git commit -m "feat: add support for Kotlin coroutines"
+
+# Breaking change (1.1.0 → 2.0.0)
+git commit -m "feat!: change API response format"
+```
+
 ## Project Structure
 ```
 ├── src/main/kotlin/       # Plugin implementation
@@ -266,7 +294,10 @@ tasks {
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Write tests for your changes
 4. Ensure all tests pass (`./gradlew test`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
+5. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/):
+   - `fix: correct typo in error message`
+   - `feat: add Python language support`
+   - `docs: update API examples`
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
 

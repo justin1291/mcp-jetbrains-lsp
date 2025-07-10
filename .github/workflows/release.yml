@@ -1,0 +1,83 @@
+name: Release Plugin
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    environment: release  # Requires approval from designated users
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          # Use BOT_TOKEN if available for branch protection, otherwise GITHUB_TOKEN
+          token: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          release-type: simple
+          
+  # Build and upload the plugin when a release is created
+  build-release:
+    needs: create-release
+    if: needs.create-release.outputs.release_created
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+    
+    - name: Make Gradle wrapper executable
+      run: chmod +x ./gradlew
+    
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+    
+    - name: Build plugin
+      run: ./gradlew buildPlugin
+    
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        files: build/distributions/*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Uncomment when ready to publish to JetBrains Marketplace
+  # publish-marketplace:
+  #   needs: [release-please, build-release]
+  #   if: needs.release-please.outputs.release_created
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
+  #   
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   
+  #   - name: Set up JDK 21
+  #     uses: actions/setup-java@v4
+  #     with:
+  #       java-version: '21'
+  #       distribution: 'temurin'
+  #   
+  #   - name: Make Gradle wrapper executable
+  #     run: chmod +x ./gradlew
+  #   
+  #   - name: Setup Gradle
+  #     uses: gradle/actions/setup-gradle@v4
+  #   
+  #   - name: Publish Plugin
+  #     env:
+  #       PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+  #     run: ./gradlew publishPlugin
