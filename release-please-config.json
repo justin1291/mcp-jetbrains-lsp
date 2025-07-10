@@ -1,0 +1,29 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "mcp-idea-lsp",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "build.gradle.kts",
+          "patterns": [
+            {
+              "pattern": "version = \"([0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?)?\"",
+              "replace": "version = \"$1\""
+            }
+          ]
+        }
+      ],
+      "changelog-sections": [
+        {"type": "feat", "section": "Features"},
+        {"type": "fix", "section": "Bug Fixes"},
+        {"type": "perf", "section": "Performance Improvements"},
+        {"type": "docs", "section": "Documentation"},
+        {"type": "chore", "section": "Miscellaneous"},
+        {"type": "refactor", "section": "Code Refactoring"},
+        {"type": "test", "section": "Tests"}
+      ]
+    }
+  }
+}
