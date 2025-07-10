@@ -1,0 +1,135 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  checks: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    - name: Make Gradle wrapper executable
+      run: chmod +x ./gradlew
+    
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+    
+    - name: Run tests
+      run: ./gradlew test
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: build/reports/tests/test/
+    
+    - name: Publish test results
+      if: always()
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      with:
+        files: |
+          build/test-results/test/TEST-*.xml
+
+  build:
+    name: Build Plugin
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+    
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+    
+    - name: Build plugin
+      run: ./gradlew buildPlugin
+    
+    - name: Verify plugin
+      run: ./gradlew verifyPlugin
+    
+    - name: Upload plugin
+      uses: actions/upload-artifact@v4
+      with:
+        name: plugin
+        path: build/distributions/*.zip
+        retention-days: 7
+
+  release:
+    name: Create Release
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download plugin artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: plugin
+        path: dist/
+    
+    - name: Get version
+      id: version
+      run: |
+        VERSION=$(grep -Po '(?<=version = ")[^"]*' build.gradle.kts)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: Release v${{ steps.version.outputs.version }}
+        draft: true
+        files: dist/*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Uncomment when ready to publish to JetBrains Marketplace
+  # publish:
+  #   name: Publish to JetBrains Marketplace
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   needs: build
+  #   runs-on: ubuntu-latest
+  #   
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   
+  #   - name: Set up JDK 21
+  #     uses: actions/setup-java@v4
+  #     with:
+  #       java-version: '21'
+  #       distribution: 'temurin'
+  #   
+  #   - name: Setup Gradle
+  #     uses: gradle/actions/setup-gradle@v3
+  #   
+  #   - name: Publish Plugin
+  #     env:
+  #       PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+  #     run: ./gradlew publishPlugin
