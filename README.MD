@@ -10,6 +10,78 @@ This plugin provides MCP tools that expose IntelliJ's powerful code analysis fea
 - Find all usages of symbols (find references)
 - Get type information and documentation (hover info)
 
+## Architecture Overview
+
+The plugin follows a modular, extensible architecture that separates concerns and makes adding new language support trivial:
+
+```
+┌─────────────────────┐     ┌────────────────────┐     ┌─────────────────────┐
+│    MCP Tools        │     │    Factories       │     │  Language Impls     │
+│  (Protocol Layer)   │────▶│ (Language Router)  │────▶│ (Analysis Logic)    │
+└─────────────────────┘     └────────────────────┘     └─────────────────────┘
+         │                           │                            │
+         │                           │                            │
+    Handles MCP              Detects language            Language-specific
+    protocol and             and returns                code analysis
+    delegates to             appropriate               implementation
+    factories                implementation
+```
+
+### Key Components
+
+1. **MCP Tools** (`src/main/kotlin/dev/mcp/extensions/lsp/tools/`)
+   - Handle MCP protocol communication
+   - Parse arguments and format responses
+   - Delegate to factories for language-specific logic
+
+2. **Factories** (`src/main/kotlin/dev/mcp/extensions/lsp/core/factories/`)
+   - Detect language from PSI elements
+   - Cache instances for performance
+   - Provide clear error messages for unsupported languages
+
+3. **Interfaces** (`src/main/kotlin/dev/mcp/extensions/lsp/core/interfaces/`)
+   - Define contracts for language implementations
+   - Enable loose coupling and extensibility
+
+4. **Language Implementations** (`src/main/kotlin/dev/mcp/extensions/lsp/languages/`)
+   - Implement language-specific analysis logic
+   - Extend BaseLanguageHandler for common functionality
+   - Currently supports Java/Kotlin
+
+### Adding New Language Support
+
+Adding support for a new language (e.g., Python) is straightforward:
+
+1. **Create Implementations**:
+   ```kotlin
+   // In src/main/kotlin/dev/mcp/extensions/lsp/languages/python/
+   class PythonSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
+       override fun extractSymbolsFlat(file: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
+           // Python-specific symbol extraction logic
+       }
+   }
+   ```
+
+2. **Update Factories**:
+   ```kotlin
+   // In SymbolExtractorFactory.kt
+   fun getExtractor(element: PsiElement): SymbolExtractor {
+       return when {
+           isJava(element.language) -> javaExtractor
+           isPython(element.language) -> pythonExtractor  // Add this
+           else -> throw UnsupportedOperationException(...)
+       }
+   }
+   ```
+
+3. **Add Plugin Dependency**:
+   ```xml
+   <!-- In plugin.xml -->
+   <depends optional="true">com.intellij.modules.python</depends>
+   ```
+
+That's it! No changes to MCP tools are needed.
+
 ## Using with Claude Code
 
 ### Quick Setup
@@ -266,11 +338,27 @@ git commit -m "feat!: change API response format"
 
 ## Project Structure
 ```
-├── src/main/kotlin/       # Plugin implementation
-├── src/test/kotlin/       # Test suite
-├── build.gradle.kts       # Build configuration
-└── .github/workflows/     # CI/CD pipeline
+├── src/
+│   ├── main/kotlin/dev/mcp/extensions/lsp/
+│   │   ├── core/
+│   │   │   ├── interfaces/      # Language implementation contracts
+│   │   │   ├── models/          # Data models (centralized)
+│   │   │   ├── factories/       # Language detection and caching
+│   │   │   └── utils/           # Shared utilities
+│   │   ├── languages/
+│   │   │   ├── base/            # Base implementation
+│   │   │   └── java/            # Java/Kotlin implementations
+│   │   └── tools/               # MCP protocol handlers
+│   └── test/kotlin/             # Test suite
+├── build.gradle.kts             # Build configuration
+└── .github/workflows/           # CI/CD pipeline
 ```
+
+## Performance Considerations
+
+- **Factory Caching**: Language implementations are cached per language to avoid repeated instantiation
+- **Read Actions**: All PSI operations are wrapped in read actions for thread safety
+- **Performance Logging**: Built-in timing measurements for all operations
 
 ## Troubleshooting
 
@@ -338,18 +426,151 @@ tasks {
 }
 ```
 
+## Roadmap
+
+### Phase 2: Python Support (Next)
+- **Python Symbol Extraction**: Classes, functions, methods, variables, decorators
+- **Python Definition Finding**: Navigate to definitions across modules
+- **Python Reference Finding**: Find usages with context (imports, calls, inheritance)
+- **Python Hover Info**: Type hints, docstrings, function signatures
+
+### Phase 3: JavaScript/TypeScript Support
+- **JS/TS Symbol Extraction**: Classes, functions, React components, exports
+- **JS/TS Definition Finding**: Navigate through modules and node_modules
+- **JS/TS Reference Finding**: Track usage across files and imports
+- **JS/TS Hover Info**: JSDoc, type information, component props
+
+### Future Enhancements
+- **Go Support**: Structs, interfaces, functions, methods
+- **Rust Support**: Structs, traits, functions, macros
+- **Multi-language Projects**: Handle mixed codebases seamlessly
+- **Performance Optimizations**: Caching, incremental updates
+- **Advanced Features**: Call hierarchy, type hierarchy, rename refactoring
+
+## Adding Language Support
+
+Thanks to our modular architecture, adding a new language is straightforward:
+
+### Quick Overview
+1. **Implement 4 interfaces** for your language
+2. **Update 4 factories** to recognize your language
+3. **Add plugin dependency** in plugin.xml
+4. That's it! No changes to MCP tools needed
+
+### Example: Adding Python Support
+
+#### 1. Create Python Implementations
+```kotlin
+// src/main/kotlin/dev/mcp/extensions/lsp/languages/python/PythonSymbolExtractor.kt
+class PythonSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
+    override fun extractSymbolsFlat(file: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
+        val symbols = mutableListOf<SymbolInfo>()
+        file.accept(object : PyRecursiveElementVisitor() {
+            override fun visitPyClass(node: PyClass) {
+                symbols.add(createClassSymbol(node))
+                super.visitPyClass(node)
+            }
+            override fun visitPyFunction(node: PyFunction) {
+                symbols.add(createFunctionSymbol(node))
+                super.visitPyFunction(node)
+            }
+        })
+        return symbols
+    }
+}
+```
+
+#### 2. Update Factories
+```kotlin
+// In SymbolExtractorFactory.kt
+fun getExtractor(element: PsiElement): SymbolExtractor {
+    return when {
+        isJava(element.language) -> JavaSymbolExtractor()
+        isPython(element.language) -> PythonSymbolExtractor()  // Add this
+        else -> throw UnsupportedOperationException(...)
+    }
+}
+```
+
+#### 3. Add Plugin Dependency
+```xml
+<!-- In plugin.xml -->
+<depends optional="true">com.intellij.modules.python</depends>
+```
+
+### Language-Specific Considerations
+- **Dynamic Languages**: Handle missing type information gracefully
+- **Language Features**: Map to common concepts (decorators → annotations)
+- **Performance**: Use language-specific indices for fast lookups
+
+### Testing New Languages
+```kotlin
+class PythonSymbolExtractorTest : BaseTest() {
+    @Test
+    fun testExtractPythonClass() {
+        val file = myFixture.addFileToProject("test.py", """
+            class MyClass:
+                def method(self):
+                    pass
+        """.trimIndent())
+        
+        val symbols = extractor.extractSymbolsFlat(file, args)
+        assertTrue(symbols.any { it.name == "MyClass" && it.kind == "class" })
+    }
+}
+```
+
 ## Contributing
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Write tests for your changes
-4. Ensure all tests pass (`./gradlew test`)
-5. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/):
-   - `fix: correct typo in error message`
-   - `feat: add Python language support`
-   - `docs: update API examples`
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+### Development Setup
+1. Clone the repository
+2. Open in IntelliJ IDEA (2024.3+)
+3. Import as Gradle project
+4. Run `./gradlew build`
+
+### Code Style
+- Use Kotlin idioms (null-safe operators, scope functions)
+- Follow existing patterns for consistency
+- Add KDoc for public APIs
+- No inline comments - use descriptive names
+
+### Testing
+```bash
+# Run all tests
+./gradlew test
+
+# Run with coverage
+./gradlew test jacocoTestReport
+
+# Run specific test
+./gradlew test --tests "*.PythonSymbolExtractorTest"
+```
+
+### Submitting Changes
+1. Fork and create feature branch
+2. Write tests for your changes
+3. Use [Conventional Commits](https://www.conventionalcommits.org/):
+   - `fix:` for bug fixes
+   - `feat:` for new features
+   - `docs:` for documentation
+   - `test:` for test additions
+   - `refactor:` for code structure changes
+4. Ensure all tests pass
+5. Submit PR with clear description
+
+### Pull Request Checklist
+- [ ] Tests pass locally
+- [ ] Code follows Kotlin conventions
+- [ ] Public APIs have KDoc comments
+- [ ] No hardcoded strings
+- [ ] Error handling implemented
+- [ ] Performance considered
+- [ ] Documentation updated
+
+### Getting Help
+- **Issues**: Report bugs or request features
+- **Discussions**: Ask questions or share ideas
+- **Wiki**: Architecture details and guides
 
 ## License
 

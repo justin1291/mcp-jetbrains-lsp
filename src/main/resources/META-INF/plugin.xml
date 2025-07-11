@@ -11,24 +11,37 @@
          Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
     <description><![CDATA[
-    Extends JetBrains MCP functionality to expose language service metadata and code intelligence.
-    Provides access to symbols, references, type information, and documentation through MCP tools.
+    Advanced language service tools for the JetBrains MCP Server, providing IDE-level code intelligence to AI assistants.
     
-    <h3>Features:</h3>
+    <h3>🚀 Multi-Language Architecture</h3>
+    <p>Built with an extensible architecture that makes adding new language support trivial. Currently supports Java and Kotlin,
+    with a clear path for adding Python, JavaScript, Go, and more.</p>
+    
+    <h3>✨ Key Features</h3>
     <ul>
-      <li>Extract symbols from files with optional hierarchical structure</li>
-      <li>Find symbol definitions with go-to-definition functionality</li>
-      <li>Find all references/usages of symbols</li>
-      <li>Get hover information including types and documentation</li>
+      <li><b>Smart Symbol Extraction</b> - Get all symbols from files with rich metadata (deprecation, JavaDoc, visibility, annotations)</li>
+      <li><b>Precise Navigation</b> - Find symbol definitions with confidence scoring and disambiguation</li>
+      <li><b>Intelligent Usage Analysis</b> - Find all references with categorization and insights</li>
+      <li><b>Rich Type Information</b> - Get hover info including documentation, type hierarchies, and usage counts</li>
     </ul>
     
-    <h3>MCP Tools Provided:</h3>
+    <h3>🛠️ MCP Tools Provided</h3>
     <ul>
-      <li><b>get_symbols_in_file</b> - Extract all symbols from a specific file (supports both flat and hierarchical views)</li>
-      <li><b>find_symbol_definition</b> - Navigate to symbol definitions</li>
-      <li><b>find_symbol_references</b> - Find all usages of a symbol</li>
-      <li><b>get_hover_info</b> - Get type information and documentation for a symbol at a position</li>
+      <li><b>get_symbols_in_file</b> - Extract symbols with metadata (flat/hierarchical, filtering, offset positions)</li>
+      <li><b>find_symbol_definition</b> - Navigate to definitions (name/position-based, confidence scoring)</li>
+      <li><b>find_symbol_references</b> - Find usages with insights (grouped by type, data flow context)</li>
+      <li><b>get_hover_info</b> - Get documentation and type info (JavaDoc, complexity, usage counts)</li>
     </ul>
+    
+    <h3>🎯 Benefits</h3>
+    <ul>
+      <li>Enable AI assistants to understand code relationships and dependencies</li>
+      <li>Make safe refactoring decisions with complete usage analysis</li>
+      <li>Navigate large codebases efficiently with IDE-level intelligence</li>
+      <li>Get accurate type information without parsing code manually</li>
+    </ul>
+    
+    <p><b>Perfect for:</b> AI-assisted development, code analysis, refactoring, and documentation generation.</p>
   ]]></description>
 
 

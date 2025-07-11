@@ -1,50 +1,24 @@
 package dev.mcp.extensions.lsp.tools
 
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VfsUtil
-import com.intellij.psi.*
-import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.search.searches.ClassInheritorsSearch
-import com.intellij.psi.search.searches.OverridingMethodsSearch
-import com.intellij.psi.search.searches.ReferencesSearch
-import com.intellij.psi.util.PsiTreeUtil
-import kotlinx.serialization.Serializable
+import dev.mcp.extensions.lsp.core.factories.HoverInfoProviderFactory
+import dev.mcp.extensions.lsp.core.factories.SymbolExtractorFactory
+import dev.mcp.extensions.lsp.core.models.GetHoverArgs
+import dev.mcp.extensions.lsp.core.utils.PsiUtils
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.ide.mcp.Response
 import org.jetbrains.mcpserverplugin.AbstractMcpTool
-import java.io.File
 
-@Serializable
-data class GetHoverArgs(
-    val filePath: String,
-    val position: Int
-)
-
-@Serializable
-data class HoverInfo(
-    val elementName: String,
-    val elementType: String,
-    val type: String? = null,
-    val presentableText: String? = null,
-    val javaDoc: String? = null,
-    val signature: String? = null,
-    val modifiers: List<String> = emptyList(),
-    val superTypes: List<String> = emptyList(),
-    val implementedBy: List<String> = emptyList(),
-    val overriddenBy: List<String> = emptyList(),
-    val calledByCount: Int = 0,
-    val complexity: Int? = null,
-    val throwsExceptions: List<String> = emptyList(),
-    val deprecationMessage: String? = null,
-    val since: String? = null,
-    val seeAlso: List<String> = emptyList(),
-    val isDeprecated: Boolean = false,
-    val module: String? = null
-)
-
+/**
+ * MCP tool for getting hover information about symbols.
+ * Delegates to language-specific implementations via HoverInfoProviderFactory.
+ */
 class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()) {
+    private val logger = Logger.getInstance(GetHoverInfoTool::class.java)
+
     override val name: String = "get_hover_info"
     override val description: String = """
         Get type info and docs at position. Like IDE hover/Ctrl+Q but with more intel.
@@ -64,465 +38,90 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
         
         Workflow: get_symbols_in_file -> use startOffset -> hover for details
         
+        Supported languages: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}
+        
         IntelliJ extras: implementors, overrides, usage counts, complexity metrics
     """.trimIndent()
 
+    /**
+     * Handles the hover information request for a specific position in a file.
+     *
+     * @param project The IntelliJ project context
+     * @param args The arguments containing file path and position
+     * @return Response containing hover information or error message
+     */
     override fun handle(project: Project, args: GetHoverArgs): Response {
         return ReadAction.compute<Response, Exception> {
-            try {
-                val file = File(project.basePath, args.filePath)
-                if (!file.exists()) {
-                    return@compute Response(null, "File not found: ${args.filePath}")
-                }
+            measureOperation("get_hover_info") {
+                try {
+                    logger.info("Processing hover info request for file: ${args.filePath}, position: ${args.position}")
 
-                val psiFile = PsiManager.getInstance(project).findFile(
-                    VfsUtil.findFileByIoFile(file, true) ?: return@compute Response(null, "Cannot find file in VFS")
-                ) ?: return@compute Response(null, "Cannot parse file")
-
-                val element = psiFile.findElementAt(args.position)
-                    ?: return@compute Response(null, "No element at position ${args.position}")
-
-                // Try to resolve reference first
-                val reference = element.parent?.reference ?: element.reference
-                val resolved = reference?.resolve()
-
-                // Get the most relevant element
-                val targetElement = resolved
-                    ?: PsiTreeUtil.getParentOfType(element, PsiNamedElement::class.java)
-                    ?: element
-
-                val hoverInfo = createHoverInfo(targetElement)
-                Response(Json.encodeToString(hoverInfo))
-            } catch (e: Exception) {
-                Response(null, "Error getting hover info: ${e.message}")
-            }
-        }
-    }
-
-    private fun createHoverInfo(element: PsiElement): HoverInfo {
-        return when (element) {
-            is PsiClass -> createClassHoverInfo(element)
-            is PsiMethod -> createMethodHoverInfo(element)
-            is PsiField -> createFieldHoverInfo(element)
-            is PsiVariable -> createVariableHoverInfo(element)
-            is PsiAnnotation -> createAnnotationHoverInfo(element)
-            else -> createGenericHoverInfo(element)
-        }
-    }
-
-    private fun createClassHoverInfo(psiClass: PsiClass): HoverInfo {
-        val type = when {
-            psiClass.isInterface -> "interface"
-            psiClass.isEnum -> "enum"
-            psiClass.isAnnotationType -> "annotation"
-            else -> "class"
-        }
-
-        val superTypes = mutableListOf<String>()
-        psiClass.extendsList?.referencedTypes?.forEach {
-            superTypes.add(it.presentableText)
-        }
-        psiClass.implementsList?.referencedTypes?.forEach {
-            superTypes.add(it.presentableText)
-        }
-
-        // Find implementors for interfaces
-        val implementedBy = if (psiClass.isInterface) {
-            findImplementors(psiClass)
-        } else {
-            emptyList()
-        }
-
-        val deprecationInfo = getDeprecationInfo(psiClass)
-        val javaDocInfo = extractEnhancedJavaDoc(psiClass)
-
-        return HoverInfo(
-            elementName = psiClass.name ?: "anonymous",
-            elementType = type,
-            type = psiClass.qualifiedName,
-            presentableText = buildClassPresentableText(psiClass),
-            javaDoc = javaDocInfo.fullDoc,
-            signature = buildClassSignature(psiClass),
-            modifiers = extractModifiers(psiClass.modifierList),
-            superTypes = superTypes,
-            implementedBy = implementedBy,
-            isDeprecated = deprecationInfo.isDeprecated,
-            deprecationMessage = deprecationInfo.message,
-            since = javaDocInfo.since,
-            seeAlso = javaDocInfo.seeAlso
-        )
-    }
-
-    private fun createMethodHoverInfo(method: PsiMethod): HoverInfo {
-        val params = method.parameterList.parameters.joinToString(", ") {
-            "${it.type.presentableText} ${it.name}"
-        }
-
-        // Get throws exceptions
-        val throwsExceptions = method.throwsList.referencedTypes.map { it.presentableText }
-
-        // Find overriding methods
-        val overriddenBy = findOverridingMethods(method)
-
-        // Count method calls
-        val calledByCount = countMethodCalls(method)
-
-        // Calculate complexity
-        val complexity = calculateCyclomaticComplexity(method)
-
-        // Get deprecation info
-        val deprecationInfo = getDeprecationInfo(method)
-
-        // Extract enhanced JavaDoc
-        val javaDocInfo = extractEnhancedJavaDoc(method)
-
-        return HoverInfo(
-            elementName = method.name,
-            elementType = if (method.isConstructor) "constructor" else "method",
-            type = method.returnType?.presentableText ?: if (method.isConstructor) "" else "void",
-            presentableText = "${method.name}($params): ${method.returnType?.presentableText ?: "void"}",
-            javaDoc = javaDocInfo.fullDoc,
-            signature = buildMethodSignature(method),
-            modifiers = extractModifiers(method.modifierList),
-            throwsExceptions = throwsExceptions,
-            overriddenBy = overriddenBy,
-            calledByCount = calledByCount,
-            complexity = complexity,
-            isDeprecated = deprecationInfo.isDeprecated,
-            deprecationMessage = deprecationInfo.message,
-            since = javaDocInfo.since,
-            seeAlso = javaDocInfo.seeAlso
-        )
-    }
-
-    private fun createFieldHoverInfo(field: PsiField): HoverInfo {
-        val deprecationInfo = getDeprecationInfo(field)
-        val javaDocInfo = extractEnhancedJavaDoc(field)
-        val calledByCount = countFieldUsage(field)
-
-        return HoverInfo(
-            elementName = field.name ?: "anonymous",
-            elementType = "field",
-            type = field.type.presentableText,
-            presentableText = "${field.name}: ${field.type.presentableText}",
-            javaDoc = javaDocInfo.fullDoc,
-            signature = "${field.type.presentableText} ${field.name}",
-            modifiers = extractModifiers(field.modifierList),
-            calledByCount = calledByCount,
-            isDeprecated = deprecationInfo.isDeprecated,
-            deprecationMessage = deprecationInfo.message,
-            since = javaDocInfo.since,
-            seeAlso = javaDocInfo.seeAlso
-        )
-    }
-
-    private fun createVariableHoverInfo(variable: PsiVariable): HoverInfo {
-        val varType = when (variable) {
-            is PsiParameter -> "parameter"
-            is PsiLocalVariable -> "variable"
-            else -> "variable"
-        }
-
-        return HoverInfo(
-            elementName = variable.name ?: "anonymous",
-            elementType = varType,
-            type = variable.type.presentableText,
-            presentableText = "${variable.name}: ${variable.type.presentableText}",
-            javaDoc = null,
-            signature = "${variable.type.presentableText} ${variable.name}",
-            modifiers = extractModifiers(variable.modifierList)
-        )
-    }
-
-    private fun createAnnotationHoverInfo(annotation: PsiAnnotation): HoverInfo {
-        val qualifiedName = annotation.qualifiedName ?: "unknown"
-        return HoverInfo(
-            elementName = qualifiedName.substringAfterLast('.'),
-            elementType = "annotation",
-            type = qualifiedName,
-            presentableText = "@${qualifiedName.substringAfterLast('.')}",
-            javaDoc = null,
-            signature = annotation.text,
-            modifiers = emptyList()
-        )
-    }
-
-    private fun createGenericHoverInfo(element: PsiElement): HoverInfo {
-        val namedElement = element as? PsiNamedElement
-        return HoverInfo(
-            elementName = namedElement?.name ?: element.text?.take(50) ?: "unknown",
-            elementType = element.javaClass.simpleName.lowercase().replace("psi", "").replace("impl", ""),
-            type = null,
-            presentableText = element.text?.lines()?.firstOrNull()?.trim(),
-            javaDoc = null,
-            signature = null,
-            modifiers = emptyList()
-        )
-    }
-
-    private fun buildClassPresentableText(psiClass: PsiClass): String {
-        val type = when {
-            psiClass.isInterface -> "interface"
-            psiClass.isEnum -> "enum"
-            psiClass.isAnnotationType -> "@interface"
-            else -> "class"
-        }
-        return "$type ${psiClass.name}"
-    }
-
-    private fun buildClassSignature(psiClass: PsiClass): String {
-        val modifiers = psiClass.modifierList?.text ?: ""
-        val type = when {
-            psiClass.isInterface -> "interface"
-            psiClass.isEnum -> "enum"
-            psiClass.isAnnotationType -> "@interface"
-            else -> "class"
-        }
-        val extends =
-            psiClass.extendsList?.referencedTypes?.firstOrNull()?.presentableText?.let { " extends $it" } ?: ""
-        val implements = psiClass.implementsList?.referencedTypes?.joinToString(", ") { it.presentableText }
-            ?.let { " implements $it" } ?: ""
-
-        return "$modifiers $type ${psiClass.name}$extends$implements".trim()
-    }
-
-    private fun buildMethodSignature(method: PsiMethod): String {
-        val params = method.parameterList.parameters.joinToString(", ") {
-            "${it.type.presentableText} ${it.name}"
-        }
-        val returnType = if (method.isConstructor) "" else "${method.returnType?.presentableText ?: "void"} "
-        val modifiers = method.modifierList.text
-        val throws = method.throwsList.referencedTypes.takeIf { it.isNotEmpty() }
-            ?.joinToString(", ") { it.presentableText }
-            ?.let { " throws $it" } ?: ""
-
-        return "$modifiers $returnType${method.name}($params)$throws".trim()
-    }
-
-    private fun extractJavaDoc(element: PsiDocCommentOwner): String? {
-        val docComment = element.docComment ?: return null
-
-        // Build JavaDoc string
-        val builder = StringBuilder()
-        builder.append("/**\n")
-
-        // Add description
-        val descriptionElements = docComment.descriptionElements
-        if (descriptionElements.isNotEmpty()) {
-            builder.append(" * ")
-            builder.append(descriptionElements.joinToString("") { it.text }.trim())
-            builder.append("\n")
-        }
-
-        // Add tags
-        docComment.tags.forEach { tag ->
-            builder.append(" * @${tag.name}")
-            tag.dataElements.forEach { data ->
-                builder.append(" ${data.text}")
-            }
-            builder.append("\n")
-        }
-
-        builder.append(" */")
-        return builder.toString()
-    }
-
-    private fun extractModifiers(modifierList: PsiModifierList?): List<String> {
-        if (modifierList == null) return emptyList()
-
-        return listOf(
-            PsiModifier.PUBLIC,
-            PsiModifier.PRIVATE,
-            PsiModifier.PROTECTED,
-            PsiModifier.STATIC,
-            PsiModifier.FINAL,
-            PsiModifier.ABSTRACT,
-            PsiModifier.SYNCHRONIZED,
-            PsiModifier.VOLATILE,
-            PsiModifier.TRANSIENT,
-            PsiModifier.NATIVE,
-            PsiModifier.STRICTFP
-        ).filter { modifierList.hasModifierProperty(it) }
-    }
-
-    private data class JavaDocInfo(
-        val fullDoc: String?,
-        val since: String? = null,
-        val seeAlso: List<String> = emptyList()
-    )
-
-    private data class DeprecationInfo(
-        val isDeprecated: Boolean,
-        val message: String? = null
-    )
-
-    private fun findImplementors(psiClass: PsiClass): List<String> {
-        val scope = GlobalSearchScope.projectScope(psiClass.project)
-        return try {
-            ClassInheritorsSearch.search(psiClass, scope, false)
-                .findAll()
-                .take(10) // Limit to prevent performance issues
-                .mapNotNull { it.qualifiedName }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun findOverridingMethods(method: PsiMethod): List<String> {
-        val scope = GlobalSearchScope.projectScope(method.project)
-        return try {
-            OverridingMethodsSearch.search(method, scope, false)
-                .findAll()
-                .take(10) // Limit to prevent performance issues
-                .map { "${it.containingClass?.qualifiedName}.${it.name}" }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun countMethodCalls(method: PsiMethod): Int {
-        val scope = GlobalSearchScope.projectScope(method.project)
-        return try {
-            var count = 0
-            ReferencesSearch.search(method, scope).forEach { _ ->
-                count++
-                if (count > 100) return 100 // Cap at 100 for performance
-            }
-            count
-        } catch (e: Exception) {
-            0
-        }
-    }
-
-    private fun countFieldUsage(field: PsiField): Int {
-        val scope = GlobalSearchScope.projectScope(field.project)
-        return try {
-            var count = 0
-            ReferencesSearch.search(field, scope).forEach { _ ->
-                count++
-                if (count > 100) return 100 // Cap at 100 for performance
-            }
-            count
-        } catch (e: Exception) {
-            0
-        }
-    }
-
-    private fun calculateCyclomaticComplexity(method: PsiMethod): Int? {
-        val body = method.body ?: return null
-        var complexity = 1 // Base complexity
-
-        body.accept(object : JavaRecursiveElementWalkingVisitor() {
-            override fun visitIfStatement(statement: PsiIfStatement) {
-                complexity++
-                super.visitIfStatement(statement)
-            }
-
-            override fun visitWhileStatement(statement: PsiWhileStatement) {
-                complexity++
-                super.visitWhileStatement(statement)
-            }
-
-            override fun visitForStatement(statement: PsiForStatement) {
-                complexity++
-                super.visitForStatement(statement)
-            }
-
-            override fun visitForeachStatement(statement: PsiForeachStatement) {
-                complexity++
-                super.visitForeachStatement(statement)
-            }
-
-            override fun visitSwitchLabelStatement(statement: PsiSwitchLabelStatement) {
-                if (statement.isDefaultCase == false) {
-                    complexity++
-                }
-                super.visitSwitchLabelStatement(statement)
-            }
-
-            override fun visitConditionalExpression(expression: PsiConditionalExpression) {
-                complexity++
-                super.visitConditionalExpression(expression)
-            }
-
-            override fun visitCatchSection(section: PsiCatchSection) {
-                complexity++
-                super.visitCatchSection(section)
-            }
-
-            override fun visitPolyadicExpression(expression: PsiPolyadicExpression) {
-                if (expression.operationTokenType == JavaTokenType.ANDAND ||
-                    expression.operationTokenType == JavaTokenType.OROR
-                ) {
-                    complexity += expression.operands.size - 1
-                }
-                super.visitPolyadicExpression(expression)
-            }
-        })
-
-        return complexity
-    }
-
-    private fun getDeprecationInfo(element: PsiModifierListOwner): DeprecationInfo {
-        val isDeprecated = element.hasAnnotation("java.lang.Deprecated")
-        if (!isDeprecated) {
-            return DeprecationInfo(false)
-        }
-
-        // Try to extract deprecation message from JavaDoc
-        val docComment = (element as? PsiDocCommentOwner)?.docComment
-        val deprecatedTag = docComment?.findTagByName("deprecated")
-        val message = deprecatedTag?.dataElements?.joinToString("") { it.text }?.trim()
-
-        return DeprecationInfo(true, message)
-    }
-
-    private fun extractEnhancedJavaDoc(element: PsiDocCommentOwner): JavaDocInfo {
-        val docComment = element.docComment ?: return JavaDocInfo(null)
-
-        // Build JavaDoc string
-        val builder = StringBuilder()
-        builder.append("/**\n")
-
-        // Add description
-        val descriptionElements = docComment.descriptionElements
-        if (descriptionElements.isNotEmpty()) {
-            builder.append(" * ")
-            builder.append(descriptionElements.joinToString("") { it.text }.trim())
-            builder.append("\n")
-        }
-
-        var since: String? = null
-        val seeAlso = mutableListOf<String>()
-
-        // Add tags and extract special ones
-        docComment.tags.forEach { tag ->
-            when (tag.name) {
-                "since" -> {
-                    since = tag.dataElements.joinToString("") { it.text }.trim()
-                }
-
-                "see" -> {
-                    val seeText = tag.dataElements.joinToString("") { it.text }.trim()
-                    if (seeText.isNotEmpty()) {
-                        seeAlso.add(seeText)
+                    if (!PsiUtils.fileExists(project, args.filePath)) {
+                        logger.warn("File not found: ${args.filePath}")
+                        return@measureOperation Response(null, "File not found: ${args.filePath}")
                     }
+
+                    val psiFile = PsiUtils.getPsiFile(project, args.filePath)
+                    if (psiFile == null) {
+                        logger.error("Cannot parse file: ${args.filePath}")
+                        return@measureOperation Response(null, "Cannot parse file: ${args.filePath}")
+                    }
+
+                    logger.info("File language: ${psiFile.language.displayName} (${psiFile.language.id})")
+
+                    val provider = try {
+                        HoverInfoProviderFactory.getProvider(psiFile)
+                    } catch (e: UnsupportedOperationException) {
+                        logger.error("Unsupported file type", e)
+                        return@measureOperation Response(
+                            null,
+                            "Unsupported language: ${psiFile.language.displayName}. " +
+                                    "Supported languages: ${
+                                        SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")
+                                    }"
+                        )
+                    }
+
+                    logger.debug("Using provider: ${provider.getSupportedLanguage()}")
+
+                    val hoverInfo = measureOperation("getHoverInfoAtPosition") {
+                        provider.getHoverInfoAtPosition(psiFile, args.position)
+                    }
+
+                    if (hoverInfo == null) {
+                        logger.warn("No element found at position ${args.position}")
+                        return@measureOperation Response(null, "No element at position ${args.position}")
+                    }
+
+                    logger.info("Got hover info for: ${hoverInfo.elementName} (${hoverInfo.elementType})")
+
+                    Response(Json.encodeToString(hoverInfo))
+                } catch (e: Exception) {
+                    logger.error("Error getting hover info", e)
+                    Response(null, "Error getting hover info: ${e.message}")
                 }
             }
-
-            builder.append(" * @${tag.name}")
-            tag.dataElements.forEach { data ->
-                builder.append(" ${data.text}")
-            }
-            builder.append("\n")
         }
+    }
 
-        builder.append(" */")
-
-        return JavaDocInfo(
-            fullDoc = builder.toString(),
-            since = since,
-            seeAlso = seeAlso
-        )
+    /**
+     * Measures the execution time of an operation and logs the result.
+     *
+     * @param operationName Name of the operation for logging
+     * @param block The operation to measure
+     * @return The result of the operation
+     */
+    private fun <T> measureOperation(operationName: String, block: () -> T): T {
+        val start = System.currentTimeMillis()
+        return try {
+            block().also {
+                val duration = System.currentTimeMillis() - start
+                logger.debug("Operation '$operationName' completed in ${duration}ms")
+            }
+        } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - start
+            logger.error("Operation '$operationName' failed after ${duration}ms", e)
+            throw e
+        }
     }
 }

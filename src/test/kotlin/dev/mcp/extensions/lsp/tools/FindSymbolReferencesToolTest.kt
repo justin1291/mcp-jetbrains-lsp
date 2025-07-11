@@ -1,9 +1,14 @@
 package dev.mcp.extensions.lsp.tools
 
 import dev.mcp.extensions.lsp.BaseTest
-import org.junit.jupiter.api.Test
+import dev.mcp.extensions.lsp.core.models.FindReferencesArgs
+import dev.mcp.extensions.lsp.core.models.GroupedReferencesResult
 import org.junit.jupiter.api.BeforeEach
-import kotlin.test.*
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class FindSymbolReferencesToolTest : BaseTest() {
     
