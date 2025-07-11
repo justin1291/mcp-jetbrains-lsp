@@ -2,35 +2,45 @@ name: Release Plugin
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
     environment: release  # Requires approval from designated users
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - uses: actions/checkout@v4
+      
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
         with:
-          # Use BOT_TOKEN if available for branch protection, otherwise GITHUB_TOKEN
-          token: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
-          release-type: simple
+          tag_name: v${{ inputs.version }}
+          name: Release ${{ inputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true  # Auto-generates release notes from commits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-  # Build and upload the plugin when a release is created
-  build-release:
+  build-and-upload:
     needs: create-release
-    if: needs.create-release.outputs.release_created
     runs-on: ubuntu-latest
     timeout-minutes: 20
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: v${{ inputs.version }}  # Checkout the tagged version
     
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -50,20 +60,21 @@ jobs:
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        tag_name: v${{ inputs.version }}
         files: build/distributions/*.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Uncomment when ready to publish to JetBrains Marketplace
   # publish-marketplace:
-  #   needs: [release-please, build-release]
-  #   if: needs.release-please.outputs.release_created
+  #   needs: [create-release, build-and-upload]
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 15
   #   
   #   steps:
   #   - uses: actions/checkout@v4
+  #     with:
+  #       ref: v${{ inputs.version }}
   #   
   #   - name: Set up JDK 21
   #     uses: actions/setup-java@v4
