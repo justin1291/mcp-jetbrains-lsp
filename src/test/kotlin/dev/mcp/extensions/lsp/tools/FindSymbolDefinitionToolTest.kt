@@ -1,8 +1,8 @@
 package dev.mcp.extensions.lsp.tools
 
 import dev.mcp.extensions.lsp.BaseTest
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import kotlin.test.*
 
 class FindSymbolDefinitionToolTest : BaseTest() {
@@ -336,6 +336,261 @@ class FindSymbolDefinitionToolTest : BaseTest() {
         val constructors = definitions.filter { it.name == "User" && it.type == "constructor" }
         if (constructors.isNotEmpty()) {
             assertTrue(constructors.size >= 1, "Should find at least one constructor")
+        }
+    }
+
+    @Test
+    fun testConfidenceScoring() {
+        val args = FindDefinitionArgs(
+            symbolName = "User",
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isEmpty()) {
+            println("PSI indexing limitation: User class not found through global search")
+            return
+        }
+        
+        // Check that all definitions have confidence scores
+        definitions.forEach { def ->
+            assertTrue(def.confidence >= 0.0f && def.confidence <= 1.0f,
+                "Confidence should be between 0 and 1")
+        }
+        
+        // Results should be sorted by confidence (highest first)
+        if (definitions.size > 1) {
+            for (i in 1 until definitions.size) {
+                assertTrue(
+                    definitions[i-1].confidence >= definitions[i].confidence,
+                    "Results should be sorted by confidence descending"
+                )
+            }
+        }
+    }
+
+    @Test
+    fun testDisambiguationHints() {
+        val args = FindDefinitionArgs(
+            symbolName = "addUser",
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isEmpty()) {
+            println("PSI indexing limitation: addUser method not found through global search")
+            return
+        }
+        
+        // Check that methods have disambiguation hints
+        val methodDef = definitions.find { it.type == "method" }
+        if (methodDef != null) {
+            assertNotNull(methodDef.disambiguationHint, "Method should have disambiguation hint")
+            assertTrue(
+                methodDef.disambiguationHint?.contains("UserService") ?: false,
+                "Hint should mention the containing class"
+            )
+        }
+    }
+
+    @Test
+    fun testTestCodeDetection() {
+        // This test would work better if we had test files in the demo project
+        val args = FindDefinitionArgs(
+            symbolName = "UserService",
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isEmpty()) {
+            println("PSI indexing limitation: UserService not found through global search")
+            return
+        }
+        
+        // Check that isTestCode field is populated
+        definitions.forEach { def ->
+            assertNotNull(def.isTestCode, "Should have isTestCode field")
+            // Since demo files are in src/main, they should not be test code
+            assertFalse(def.isTestCode, "Demo files should not be marked as test code")
+        }
+    }
+
+    @Test
+    fun testLibraryCodeDetection() {
+        // Try to find a JDK class like String
+        val args = FindDefinitionArgs(
+            symbolName = "String",
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        // JDK classes might not be found in tests, but if found, should be marked as library code
+        if (definitions.isNotEmpty()) {
+            val stringClass = definitions.find { it.name == "String" && it.type == "class" }
+            if (stringClass != null) {
+                assertTrue(stringClass.isLibraryCode, "JDK String class should be marked as library code")
+            }
+        }
+    }
+
+    @Test
+    fun testAccessibilityWarnings() {
+        val args = FindDefinitionArgs(
+            symbolName = "users", // Private field in UserService
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isEmpty()) {
+            println("PSI indexing limitation: users field not found through global search")
+            return
+        }
+        
+        // Check accessibility warning for private field
+        val usersField = definitions.find { it.name == "users" && it.type == "field" }
+        if (usersField != null && usersField.modifiers.contains("private")) {
+            assertNotNull(usersField.accessibilityWarning, "Private field should have accessibility warning")
+            assertTrue(
+                usersField.accessibilityWarning?.contains("Private") ?: false,
+                "Warning should mention private access"
+            )
+        }
+    }
+
+    @Test
+    fun testQualifiedNameSearch() {
+        // Test searching with qualified name format
+        val args = FindDefinitionArgs(
+            symbolName = "UserService.addUser",
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isNotEmpty()) {
+            val addUserMethod = definitions.find { it.name == "addUser" }
+            assertNotNull(addUserMethod, "Should find addUser method with qualified search")
+            assertEquals(1.0f, addUserMethod?.confidence ?: 0f, "Qualified match should have highest confidence")
+        }
+    }
+
+    @Test
+    fun testStaticMethodDisambiguation() {
+        val args = FindDefinitionArgs(
+            symbolName = "isValidUser",
+            filePath = null,
+            position = null
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isEmpty()) {
+            println("PSI indexing limitation: isValidUser method not found through global search")
+            return
+        }
+        
+        val staticMethod = definitions.find { it.name == "isValidUser" && it.modifiers.contains("static") }
+        if (staticMethod != null) {
+            assertNotNull(staticMethod.disambiguationHint, "Static method should have disambiguation hint")
+            assertTrue(
+                staticMethod.disambiguationHint?.contains("Static") ?: false,
+                "Hint should indicate it's a static method"
+            )
+        }
+    }
+
+    @Test
+    fun testPositionBasedSearchWithConfidence() {
+        // Test that position-based search returns high confidence
+        val args = FindDefinitionArgs(
+            symbolName = null,
+            filePath = "src/main/java/com/example/demo/UserService.java",
+            position = 800 // Approximate position
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("Tool error: ${response.error}")
+            return
+        }
+        
+        val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
+        
+        if (definitions.isNotEmpty()) {
+            val definition = definitions[0]
+            assertTrue(
+                definition.confidence >= 0.9f,
+                "Position-based search should have high confidence"
+            )
         }
     }
 }

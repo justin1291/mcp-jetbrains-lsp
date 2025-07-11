@@ -1,19 +1,21 @@
 package dev.mcp.extensions.lsp.tools
 
 import com.intellij.openapi.application.ReadAction
-import org.jetbrains.ide.mcp.Response
-import org.jetbrains.mcpserverplugin.AbstractMcpTool
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.roots.ProjectFileIndex
+import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.*
+import com.intellij.psi.javadoc.PsiDocComment
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiShortNamesCache
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import org.jetbrains.ide.mcp.Response
+import org.jetbrains.mcpserverplugin.AbstractMcpTool
 import java.io.File
 
 @Serializable
@@ -34,45 +36,67 @@ data class ReferenceInfo(
     val elementText: String? = null,
     val preview: String? = null,
     val containingMethod: String? = null,
-    val containingClass: String? = null
+    val containingClass: String? = null,
+    val isInTestCode: Boolean = false,
+    val isInComment: Boolean = false,
+    val accessModifier: String? = null,
+    val surroundingContext: String? = null,
+    val dataFlowContext: String? = null,
+    val isInDeprecatedCode: Boolean = false
+)
+
+@Serializable
+data class GroupedReferencesResult(
+    val summary: ReferenceSummary,
+    val usagesByType: Map<String, List<ReferenceInfo>>,
+    val insights: List<String>,
+    val allReferences: List<ReferenceInfo>
+)
+
+@Serializable
+data class ReferenceSummary(
+    val totalReferences: Int,
+    val fileCount: Int,
+    val hasTestUsages: Boolean,
+    val primaryUsageLocation: String? = null,
+    val deprecatedUsageCount: Int = 0
 )
 
 class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferencesArgs.serializer()) {
     override val name: String = "find_symbol_references"
     override val description: String = """
-        Find all places where a symbol is used or referenced (find usages).
+        Find all usages of symbol. Returns grouped results with insights.
         
-        Use this tool when you need to:
-        - Understand the impact of changing a method, class, or field
-        - Find all callers of a specific method
-        - See where a variable is read or written
-        - Track down all usages before refactoring
-        - Analyze dependencies and coupling
+        Use when: need impact analysis, find callers, refactoring prep, usage patterns
         
-        The tool categorizes each usage by type:
-        - method_call: Method is being invoked
-        - read: Field/variable is being read
-        - write: Field/variable is being assigned
-        - type_reference: Used as a type (e.g., in declarations)
-        - constructor_call: Constructor is being invoked
-        - declaration: The original declaration
-        - override: Method override
+        Returns:
+        - Grouped by usage type (method_call, field_read, field_write, etc)
+        - Insights: "Primary usage in UserController (15 calls)", "No test usage - add tests", "3 deprecated usages"
+        - Data flow context: "passed as argument", "returned from method", "used in condition"
+        - Each ref has: location, usage type, test/deprecated flags, surrounding code
         
-        Parameters:
-        - symbolName: The name of the symbol to find references for
-        - filePath: (Optional) File containing the symbol
-        - position: (Optional) Character offset of the symbol
-        - includeDeclaration: Whether to include the original declaration in results
+        Usage types: method_call, static_method_call, getter_call, setter_call, field_read, field_write, field_increment, constructor_call, type_reference, method_override
         
-        Returns all locations where the symbol is referenced, with context and usage type.
-        This is equivalent to "Find Usages" or Shift+F12 in an IDE.
+        Params:
+        - symbolName: name to find
+        - filePath + position: find at specific location
+        - includeDeclaration: include original declaration
+        
+        Offsets included for precise edits. Better than basic find-usages: categorizes, provides insights, shows data flow.
     """.trimIndent()
 
     override fun handle(project: Project, args: FindReferencesArgs): Response {
         return ReadAction.compute<Response, Exception> {
             try {
                 val element = findTargetElement(project, args) 
-                    ?: return@compute Response(Json.encodeToString(emptyList<ReferenceInfo>()))
+                    ?: return@compute Response(Json.encodeToString(
+                        GroupedReferencesResult(
+                            summary = ReferenceSummary(0, 0, false),
+                            usagesByType = emptyMap(),
+                            insights = listOf("Symbol not found"),
+                            allReferences = emptyList()
+                        )
+                    ))
                 
                 val references = mutableListOf<ReferenceInfo>()
                 val scope = GlobalSearchScope.projectScope(project)
@@ -96,7 +120,7 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
                 // Find overrides if it's a method
                 if (element is PsiMethod) {
                     findOverrides(element, scope).forEach { override ->
-                        references.add(createReferenceInfo(override, element, "override"))
+                        references.add(createReferenceInfo(override, element, "method_override"))
                     }
                 }
                 
@@ -105,12 +129,162 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
                     references.add(0, createReferenceInfo(element, element, "declaration"))
                 }
                 
-                Response(Json.encodeToString(references))
+                // Create grouped result with insights
+                val groupedResult = createGroupedResult(references, element)
+                Response(Json.encodeToString(groupedResult))
             } catch (e: Exception) {
                 Response(null, "Error finding symbol references: ${e.message}")
             }
         }
     }
+
+    private fun createGroupedResult(references: List<ReferenceInfo>, element: PsiElement): GroupedReferencesResult {
+        // Group references by usage type
+        val usagesByType = references.groupBy { it.usageType }
+        
+        // Calculate summary statistics
+        val fileCount = references.map { it.filePath }.distinct().size
+        val hasTestUsages = references.any { it.isInTestCode }
+        val deprecatedUsageCount = countDeprecatedUsages(references, element)
+        
+        // Find primary usage location
+        val primaryUsageLocation = findPrimaryUsageLocation(references)
+        
+        val summary = ReferenceSummary(
+            totalReferences = references.size,
+            fileCount = fileCount,
+            hasTestUsages = hasTestUsages,
+            primaryUsageLocation = primaryUsageLocation,
+            deprecatedUsageCount = deprecatedUsageCount
+        )
+        
+        // Generate insights
+        val insights = generateInsights(references, element, summary)
+        
+        return GroupedReferencesResult(
+            summary = summary,
+            usagesByType = usagesByType,
+            insights = insights,
+            allReferences = references
+        )
+    }
+    
+    private fun generateInsights(references: List<ReferenceInfo>, element: PsiElement, summary: ReferenceSummary): List<String> {
+        val insights = mutableListOf<String>()
+        
+        // Primary usage insight
+        if (summary.primaryUsageLocation != null) {
+            val primaryCount = references.count { it.containingClass == summary.primaryUsageLocation }
+            insights.add("Primary usage is in ${summary.primaryUsageLocation.substringAfterLast('.')} ($primaryCount ${if (primaryCount == 1) "call" else "calls"})")
+        }
+        
+        // Test coverage insight
+        if (!summary.hasTestUsages && references.isNotEmpty()) {
+            insights.add("No usage found in test code - consider adding tests")
+        } else if (summary.hasTestUsages) {
+            val testCount = references.count { it.isInTestCode }
+            val testPercentage = (testCount * 100) / references.size
+            if (testPercentage < 20 && references.size > 5) {
+                insights.add("Only $testPercentage% of usages are in tests - consider increasing test coverage")
+            }
+        }
+        
+        // Deprecated usage insight
+        if (summary.deprecatedUsageCount > 0) {
+            insights.add("${summary.deprecatedUsageCount} deprecated ${if (summary.deprecatedUsageCount == 1) "usage" else "usages"} found - consider updating")
+        }
+        
+        // Method-specific insights
+        if (element is PsiMethod) {
+            val overrideCount = references.count { it.usageType == "method_override" }
+            if (overrideCount > 0) {
+                insights.add("Method is overridden $overrideCount ${if (overrideCount == 1) "time" else "times"} - changes will affect subclasses")
+            }
+            
+            if (element.name?.startsWith("get") == true || element.name?.startsWith("set") == true) {
+                val directFieldAccess = findDirectFieldAccess(element)
+                if (directFieldAccess > 0) {
+                    insights.add("Field has $directFieldAccess direct ${if (directFieldAccess == 1) "access" else "accesses"} bypassing this ${if (element.name?.startsWith("get") == true) "getter" else "setter"}")
+                }
+            }
+        }
+        
+        // Field-specific insights
+        if (element is PsiField) {
+            val writeCount = references.count { it.usageType == "field_write" }
+            val readCount = references.count { it.usageType == "field_read" || it.usageType == "field_as_argument" }
+            
+            if (writeCount == 0 && readCount > 0) {
+                insights.add("Field is never modified after initialization - consider making it final")
+            } else if (writeCount > readCount && readCount > 0) {
+                insights.add("Field is written more often than read ($writeCount writes, $readCount reads)")
+            }
+            
+            if (element.hasModifierProperty(PsiModifier.PUBLIC)) {
+                insights.add("Public field has ${references.size} direct ${if (references.size == 1) "access" else "accesses"} - consider using getter/setter")
+            }
+        }
+        
+        // Usage pattern insights
+        val methodCallTypes = references.filter { it.usageType.endsWith("_call") }
+        if (methodCallTypes.size > 10) {
+            val mostCommonCaller = references
+                .filter { it.containingClass != null }
+                .groupBy { it.containingClass }
+                .maxByOrNull { it.value.size }
+            
+            if (mostCommonCaller != null && mostCommonCaller.value.size > references.size / 2) {
+                insights.add("Heavily coupled to ${mostCommonCaller.key?.substringAfterLast('.')} - consider refactoring")
+            }
+        }
+        
+        // Comment/JavaDoc references
+        val commentRefs = references.count { it.isInComment }
+        if (commentRefs > 0) {
+            insights.add("$commentRefs ${if (commentRefs == 1) "reference" else "references"} in comments/JavaDoc - update documentation if changing")
+        }
+        
+        return insights
+    }
+    
+    private fun findPrimaryUsageLocation(references: List<ReferenceInfo>): String? {
+        if (references.isEmpty()) return null
+        
+        return references
+            .filter { it.containingClass != null && !it.isInTestCode }
+            .groupBy { it.containingClass }
+            .maxByOrNull { it.value.size }
+            ?.key
+    }
+    
+    private fun countDeprecatedUsages(references: List<ReferenceInfo>, element: PsiElement): Int {
+        return references.count { it.isInDeprecatedCode }
+    }
+    
+    private fun findDirectFieldAccess(method: PsiMethod): Int {
+        // Simple heuristic: if it's a getter/setter, find the corresponding field
+        val fieldName = when {
+            method.name?.startsWith("get") == true -> method.name?.substring(3)?.decapitalize()
+            method.name?.startsWith("set") == true -> method.name?.substring(3)?.decapitalize()
+            else -> return 0
+        }
+        
+        val field = method.containingClass?.findFieldByName(fieldName ?: return 0, false)
+        if (field != null) {
+            // Count direct accesses to this field (this is a simplified check)
+            val scope = GlobalSearchScope.projectScope(method.project)
+            var count = 0
+            ReferencesSearch.search(field, scope).forEach { _ ->
+                count++
+            }
+            return count
+        }
+        
+        return 0
+    }
+    
+    private fun String.decapitalize(): String = 
+        if (isEmpty()) this else this[0].lowercaseChar() + substring(1)
 
     private fun findTargetElement(project: Project, args: FindReferencesArgs): PsiElement? {
         // If position is provided, find element at that position
@@ -219,6 +393,46 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
         val containingMethod = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
         val containingClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)
         
+        // Check if in test code
+        val isInTest = isInTestCode(virtualFile) || isInTestMethod(element)
+        
+        // Check if in comment or JavaDoc
+        val isInComment = isInJavaDoc(element) || PsiTreeUtil.getParentOfType(element, PsiComment::class.java) != null
+        
+        // Check if in deprecated code
+        val isInDeprecatedCode = containingMethod?.hasAnnotation("java.lang.Deprecated") == true ||
+                                 containingClass?.hasAnnotation("java.lang.Deprecated") == true
+        
+        // Get access context
+        val accessModifier = when (element.parent) {
+            is PsiReferenceExpression -> {
+                val qualifier = (element.parent as PsiReferenceExpression).qualifierExpression
+                when {
+                    qualifier == null -> "implicit"
+                    qualifier.text == "this" -> "this"
+                    qualifier.text == "super" -> "super"
+                    else -> "qualified"
+                }
+            }
+            else -> null
+        }
+        
+        // Get surrounding context (2 lines before and after)
+        val surroundingContext = if (document != null && lineNumber > 0) {
+            val startLine = (lineNumber - 2).coerceAtLeast(0)
+            val endLine = (lineNumber + 2).coerceAtMost(document.lineCount - 1)
+            val contextLines = (startLine..endLine).map { line ->
+                val start = document.getLineStartOffset(line)
+                val end = document.getLineEndOffset(line)
+                val prefix = if (line == lineNumber) ">>> " else "    "
+                prefix + document.text.substring(start, end).trim()
+            }
+            contextLines.joinToString("\n")
+        } else null
+        
+        // Get data flow context
+        val dataFlowContext = getDataFlowContext(element, target)
+        
         return ReferenceInfo(
             filePath = relativePath,
             startOffset = textRange.startOffset,
@@ -228,8 +442,57 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
             elementText = element.text?.trim(),
             preview = lineText,
             containingMethod = containingMethod?.name,
-            containingClass = containingClass?.qualifiedName
+            containingClass = containingClass?.qualifiedName,
+            isInTestCode = isInTest,
+            isInComment = isInComment,
+            accessModifier = accessModifier,
+            surroundingContext = surroundingContext,
+            dataFlowContext = dataFlowContext,
+            isInDeprecatedCode = isInDeprecatedCode
         )
+    }
+    
+    private fun getDataFlowContext(element: PsiElement, target: PsiElement): String? {
+        val parent = element.parent
+        
+        return when {
+            // Assignment contexts
+            parent is PsiAssignmentExpression && parent.lExpression == element -> "assigned to"
+            parent is PsiAssignmentExpression && parent.rExpression == element -> "assigned from"
+            
+            // Method contexts
+            parent is PsiReturnStatement -> "returned from method"
+            parent is PsiExpressionList && parent.parent is PsiMethodCallExpression -> "passed as argument"
+            
+            // Control flow contexts
+            isInCondition(element) -> "used in condition"
+            parent is PsiIfStatement -> "condition check"
+            parent is PsiWhileStatement -> "loop condition"
+            parent is PsiForStatement -> "loop initialization"
+            
+            // Field initialization
+            parent is PsiField -> "field initializer"
+            parent is PsiNewExpression -> "constructor argument"
+            
+            // Type contexts
+            parent is PsiTypeElement && parent.parent is PsiLocalVariable -> "variable declaration"
+            parent is PsiTypeElement && parent.parent is PsiParameter -> "parameter declaration"
+            parent is PsiTypeElement && parent.parent is PsiMethod -> "return type declaration"
+            
+            // Expression contexts
+            parent is PsiPrefixExpression -> "prefix operation"
+            parent is PsiPostfixExpression -> "postfix operation"
+            parent is PsiBinaryExpression -> "binary operation"
+            
+            else -> null
+        }
+    }
+    
+    private fun isInTestCode(virtualFile: VirtualFile): Boolean {
+        val path = virtualFile.path
+        return path.contains("/test/") || path.contains("/tests/") || 
+               path.contains("Test.java") || path.contains("Tests.java") ||
+               path.contains("Spec.java")
     }
 
     private fun determineUsageType(element: PsiElement, target: PsiElement): String {
@@ -237,19 +500,111 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
         
         return when {
             element == target -> "declaration"
-            parent is PsiMethodCallExpression -> "method_call"
-            parent is PsiNewExpression && target is PsiMethod && target.isConstructor -> "constructor_call"
-            parent is PsiReferenceExpression && parent.parent is PsiAssignmentExpression -> {
-                val assignment = parent.parent as PsiAssignmentExpression
-                if (assignment.lExpression == parent) "write" else "read"
+            
+            // Method calls - be more specific
+            parent is PsiMethodCallExpression -> {
+                val method = (target as? PsiMethod)
+                when {
+                    method?.name == "equals" -> "equals_call"
+                    method?.name == "toString" -> "toString_call"
+                    method?.name == "hashCode" -> "hashCode_call"
+                    method?.name?.startsWith("get") == true -> "getter_call"
+                    method?.name?.startsWith("set") == true -> "setter_call"
+                    method?.name?.startsWith("is") == true -> "boolean_check"
+                    method?.hasModifierProperty(PsiModifier.STATIC) == true -> "static_method_call"
+                    isInTestMethod(element) -> "test_method_call"
+                    else -> "method_call"
+                }
             }
-            parent is PsiReferenceExpression -> "read"
-            parent is PsiImportStatement -> "import"
-            parent is PsiTypeElement -> "type_reference"
-            parent is PsiNewExpression -> "constructor_call"
-            element is PsiMethod && target is PsiMethod && isOverride(element, target) -> "override"
+            
+            // Constructor calls
+            parent is PsiNewExpression -> {
+                when {
+                    parent.arrayInitializer != null -> "array_creation"
+                    isInTestMethod(element) -> "test_instantiation"
+                    else -> "constructor_call"
+                }
+            }
+            
+            // Field access - distinguish between different contexts
+            parent is PsiReferenceExpression -> {
+                val grandParent = parent.parent
+                when {
+                    grandParent is PsiAssignmentExpression && grandParent.lExpression == parent -> "field_write"
+                    grandParent is PsiAssignmentExpression -> "field_read"
+                    grandParent is PsiPrefixExpression -> "field_increment"
+                    grandParent is PsiPostfixExpression -> "field_increment"
+                    isInCondition(parent) -> "field_condition_check"
+                    isInMethodCall(parent) -> "field_as_argument"
+                    else -> "field_read"
+                }
+            }
+            
+            // Type references - be more specific
+            parent is PsiTypeElement -> {
+                val context = PsiTreeUtil.getParentOfType(parent, 
+                    PsiLocalVariable::class.java,
+                    PsiParameter::class.java,
+                    PsiMethod::class.java,
+                    PsiField::class.java,
+                    PsiCatchSection::class.java,
+                    PsiInstanceOfExpression::class.java,
+                    PsiTypeCastExpression::class.java
+                )
+                when (context) {
+                    is PsiLocalVariable -> "local_variable_type"
+                    is PsiParameter -> "parameter_type"
+                    is PsiMethod -> "return_type"
+                    is PsiField -> "field_type"
+                    is PsiCatchSection -> "catch_type"
+                    is PsiInstanceOfExpression -> "instanceof_check"
+                    is PsiTypeCastExpression -> "type_cast"
+                    else -> "type_reference"
+                }
+            }
+            
+            parent is PsiImportStatement -> {
+                when {
+                    parent.isOnDemand -> "wildcard_import"
+                    else -> "import"
+                }
+            }
+            
+            // Method overrides
+            element is PsiMethod && target is PsiMethod && isOverride(element, target) -> "method_override"
+            
+            // Annotations
+            parent is PsiAnnotation -> "annotation_use"
+            
+            // JavaDoc references
+            isInJavaDoc(element) -> "javadoc_reference"
+            
             else -> "reference"
         }
+    }
+    
+    private fun isInCondition(element: PsiElement): Boolean {
+        return PsiTreeUtil.getParentOfType(element, 
+            PsiIfStatement::class.java, 
+            PsiWhileStatement::class.java,
+            PsiConditionalExpression::class.java,
+            PsiSwitchStatement::class.java
+        ) != null
+    }
+    
+    private fun isInTestMethod(element: PsiElement): Boolean {
+        val method = PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
+        return method?.hasAnnotation("org.junit.Test") == true ||
+               method?.hasAnnotation("org.junit.jupiter.api.Test") == true ||
+               method?.name?.startsWith("test") == true
+    }
+    
+    private fun isInMethodCall(element: PsiElement): Boolean {
+        return PsiTreeUtil.getParentOfType(element, PsiExpressionList::class.java) != null
+    }
+    
+    private fun isInJavaDoc(element: PsiElement): Boolean {
+        return PsiTreeUtil.getParentOfType(element, PsiDocComment::class.java) != null
     }
 
     private fun findConstructorCalls(constructor: PsiMethod, scope: GlobalSearchScope): List<PsiNewExpression> {
@@ -272,7 +627,6 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
         val containingClass = method.containingClass ?: return result
         
         // Find all subclasses
-        val facade = JavaPsiFacade.getInstance(method.project)
         val allClasses = PsiShortNamesCache.getInstance(method.project)
             .getClassesByName("*", scope)
             .toList()

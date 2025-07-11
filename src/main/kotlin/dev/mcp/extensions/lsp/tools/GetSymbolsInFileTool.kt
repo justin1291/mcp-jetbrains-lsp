@@ -30,28 +30,57 @@ data class SymbolInfo(
     val modifiers: List<String> = emptyList(),
     val parameters: List<String>? = null,
     val returnType: String? = null,
-    val children: List<SymbolInfo>? = null  // For hierarchical structure
+    val children: List<SymbolInfo>? = null,  // For hierarchical structure
+    val isDeprecated: Boolean = false,
+    val hasJavadoc: Boolean = false,
+    val isOverride: Boolean = false,
+    val overrides: String? = null,
+    val visibility: String = "package-private",
+    val annotations: List<String> = emptyList()
 )
 
 class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.serializer()) {
     override val name: String = "get_symbols_in_file"
     override val description: String = """
-        Extract all symbols (classes, methods, fields, etc.) from a specific file.
+        🔑 START HERE: Extract all symbols (classes, methods, fields, etc.) from a specific file.
         
-        Use this tool when you need to:
+        This is the ESSENTIAL first step for exploring code. Use this tool when you need to:
         - Get an overview of all classes, methods, and fields in a file
+        - Check for deprecated APIs before using them
+        - See which methods override parent class methods
+        - Identify public vs private APIs
+        - Find documented vs undocumented code
         - Understand the structure and organization of code
-        - Find specific symbols within a file before using other tools
-        - Create a mental map of what's available in a file
+        
+        The tool provides rich metadata for each symbol:
+        - isDeprecated: Avoid using deprecated APIs
+        - isOverride/overrides: Understand inheritance relationships
+        - visibility: Know what's accessible (public/private/protected)
+        - hasJavadoc: Identify well-documented code
+        - annotations: See @Override, @Deprecated, @Test etc.
         
         Parameters:
         - filePath: Path to the file relative to project root
         - hierarchical: If true, returns nested structure (methods inside classes). If false, returns flat list
-        - symbolTypes: Optional filter for specific types ["class", "method", "field", "import"]
+        - symbolTypes: Optional filter for specific types ["class", "interface", "method", "constructor", "field", "import"]
         - includeImports: Whether to include import statements
         
-        Returns a list of symbols with their locations, types, and modifiers.
-        This is your starting point for understanding any file's contents.
+        ⚡ Precise Editing Support:
+        Each result includes exact character positions:
+        - startOffset: Character position where symbol begins
+        - endOffset: Character position where symbol ends  
+        - lineNumber: Line number (1-based)
+
+        Use these offsets with your file editing capabilities for surgical code modifications - 
+        change just a method or field without replacing entire files.
+        
+        💡 The startOffset values in results can be used as position parameters in other tools:
+        - find_symbol_definition: Navigate to symbol declarations
+        - find_symbol_references: Find all usages of symbols
+        - get_hover_info: Get detailed type information
+        
+        Returns a list of symbols with their locations, types, modifiers, and important metadata.
+        Always start here to understand a file before making changes.
     """.trimIndent()
 
     override fun handle(project: Project, args: GetSymbolsArgs): Response {
@@ -145,6 +174,11 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
         val textRange = psiClass.textRange
         val document = PsiDocumentManager.getInstance(psiClass.project).getDocument(psiClass.containingFile)
         val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
+        
+        val annotations = psiClass.annotations.map { 
+            val name = it.qualifiedName?.substringAfterLast('.') ?: it.text
+            if (name.startsWith("@")) name else "@$name"
+        }
 
         val children = if (includeChildren && args != null) {
             val childSymbols = mutableListOf<SymbolInfo>()
@@ -186,7 +220,11 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
             endOffset = textRange.endOffset,
             lineNumber = lineNumber + 1, // Convert to 1-based
             modifiers = extractModifiers(psiClass.modifierList),
-            children = children
+            children = children,
+            isDeprecated = psiClass.hasAnnotation("java.lang.Deprecated"),
+            hasJavadoc = psiClass.docComment != null,
+            visibility = getVisibility(psiClass.modifierList),
+            annotations = annotations
         )
     }
 
@@ -194,6 +232,12 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
         val textRange = psiMethod.textRange
         val document = PsiDocumentManager.getInstance(psiMethod.project).getDocument(psiMethod.containingFile)
         val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
+        
+        val superMethods = psiMethod.findSuperMethods()
+        val annotations = psiMethod.annotations.map { 
+            val name = it.qualifiedName?.substringAfterLast('.') ?: it.text
+            if (name.startsWith("@")) name else "@$name"
+        }
 
         return SymbolInfo(
             name = psiMethod.name,
@@ -206,7 +250,15 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
             parameters = psiMethod.parameterList.parameters.map { param ->
                 "${param.type.presentableText} ${param.name}"
             },
-            returnType = psiMethod.returnType?.presentableText
+            returnType = psiMethod.returnType?.presentableText,
+            isDeprecated = psiMethod.hasAnnotation("java.lang.Deprecated"),
+            hasJavadoc = psiMethod.docComment != null,
+            isOverride = psiMethod.hasAnnotation("java.lang.Override") || superMethods.isNotEmpty(),
+            overrides = superMethods.firstOrNull()?.let { 
+                "${it.containingClass?.qualifiedName}.${it.name}"
+            },
+            visibility = getVisibility(psiMethod.modifierList),
+            annotations = annotations
         )
     }
 
@@ -214,6 +266,11 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
         val textRange = psiField.textRange
         val document = PsiDocumentManager.getInstance(psiField.project).getDocument(psiField.containingFile)
         val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
+        
+        val annotations = psiField.annotations.map { 
+            val name = it.qualifiedName?.substringAfterLast('.') ?: it.text
+            if (name.startsWith("@")) name else "@$name"
+        }
 
         return SymbolInfo(
             name = psiField.name ?: "anonymous",
@@ -222,7 +279,11 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
             startOffset = textRange.startOffset,
             endOffset = textRange.endOffset,
             lineNumber = lineNumber + 1,
-            modifiers = extractModifiers(psiField.modifierList)
+            modifiers = extractModifiers(psiField.modifierList),
+            isDeprecated = psiField.hasAnnotation("java.lang.Deprecated"),
+            hasJavadoc = psiField.docComment != null,
+            visibility = getVisibility(psiField.modifierList),
+            annotations = annotations
         )
     }
 
@@ -259,5 +320,14 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
             PsiModifier.VOLATILE,
             PsiModifier.TRANSIENT
         ).filter { modifierList.hasModifierProperty(it) }
+    }
+    
+    private fun getVisibility(modifierList: PsiModifierList?): String {
+        return when {
+            modifierList?.hasModifierProperty(PsiModifier.PUBLIC) == true -> "public"
+            modifierList?.hasModifierProperty(PsiModifier.PRIVATE) == true -> "private"
+            modifierList?.hasModifierProperty(PsiModifier.PROTECTED) == true -> "protected"
+            else -> "package-private"
+        }
     }
 }

@@ -4,6 +4,10 @@ import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.psi.*
+import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.searches.ClassInheritorsSearch
+import com.intellij.psi.search.searches.OverridingMethodsSearch
+import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -26,33 +30,41 @@ data class HoverInfo(
     val presentableText: String? = null,
     val javaDoc: String? = null,
     val signature: String? = null,
-    val modifiers: List<String> = emptyList()
+    val modifiers: List<String> = emptyList(),
+    val superTypes: List<String> = emptyList(),
+    val implementedBy: List<String> = emptyList(),
+    val overriddenBy: List<String> = emptyList(),
+    val calledByCount: Int = 0,
+    val complexity: Int? = null,
+    val throwsExceptions: List<String> = emptyList(),
+    val deprecationMessage: String? = null,
+    val since: String? = null,
+    val seeAlso: List<String> = emptyList(),
+    val isDeprecated: Boolean = false,
+    val module: String? = null
 )
 
 class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()) {
     override val name: String = "get_hover_info"
     override val description: String = """
-        Get type information and documentation for a symbol at a specific position.
+        Get type info and docs at position. Like IDE hover/Ctrl+Q but with more intel.
         
-        Use this tool when you need to:
-        - See the type of a variable or expression
-        - Read documentation without navigating away
-        - Understand method signatures and parameters
-        - Check the modifiers of a field or method
-        - Get quick information about any code element
+        Use when: need type info, read docs, check signatures, see modifiers, inheritance, usage stats, deprecation
         
-        Parameters:
-        - filePath: Path to the file relative to project root
-        - position: Character offset in the file where to get hover info
+        Returns:
+        - Basic: name, type, signature, modifiers, javadoc
+        - Classes: superTypes, implementedBy (interfaces)
+        - Methods: overriddenBy, calledByCount, complexity, throwsExceptions
+        - Extracted tags: @since, @see, @deprecated message
+        - Fields: usage count
         
-        Returns detailed information about the element at the position including:
-        - Element name and type
-        - Full type information for variables
-        - Method signatures with parameters
-        - JavaDoc/KDoc documentation
-        - Access modifiers
+        Params:
+        - filePath: relative to project
+        - position: char offset (use get_symbols_in_file startOffset)
         
-        This is equivalent to hovering over code in an IDE or using Ctrl+Q for quick documentation.
+        Workflow: get_symbols_in_file -> use startOffset -> hover for details
+        
+        IntelliJ extras: implementors, overrides, usage counts, complexity metrics
     """.trimIndent()
 
     override fun handle(project: Project, args: GetHoverArgs): Response {
@@ -67,15 +79,15 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
                     VfsUtil.findFileByIoFile(file, true) ?: return@compute Response(null, "Cannot find file in VFS")
                 ) ?: return@compute Response(null, "Cannot parse file")
 
-                val element = psiFile.findElementAt(args.position) 
+                val element = psiFile.findElementAt(args.position)
                     ?: return@compute Response(null, "No element at position ${args.position}")
 
                 // Try to resolve reference first
                 val reference = element.parent?.reference ?: element.reference
                 val resolved = reference?.resolve()
-                
+
                 // Get the most relevant element
-                val targetElement = resolved 
+                val targetElement = resolved
                     ?: PsiTreeUtil.getParentOfType(element, PsiNamedElement::class.java)
                     ?: element
 
@@ -105,43 +117,102 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
             psiClass.isAnnotationType -> "annotation"
             else -> "class"
         }
-        
+
+        val superTypes = mutableListOf<String>()
+        psiClass.extendsList?.referencedTypes?.forEach {
+            superTypes.add(it.presentableText)
+        }
+        psiClass.implementsList?.referencedTypes?.forEach {
+            superTypes.add(it.presentableText)
+        }
+
+        // Find implementors for interfaces
+        val implementedBy = if (psiClass.isInterface) {
+            findImplementors(psiClass)
+        } else {
+            emptyList()
+        }
+
+        val deprecationInfo = getDeprecationInfo(psiClass)
+        val javaDocInfo = extractEnhancedJavaDoc(psiClass)
+
         return HoverInfo(
             elementName = psiClass.name ?: "anonymous",
             elementType = type,
             type = psiClass.qualifiedName,
             presentableText = buildClassPresentableText(psiClass),
-            javaDoc = extractJavaDoc(psiClass),
+            javaDoc = javaDocInfo.fullDoc,
             signature = buildClassSignature(psiClass),
-            modifiers = extractModifiers(psiClass.modifierList)
+            modifiers = extractModifiers(psiClass.modifierList),
+            superTypes = superTypes,
+            implementedBy = implementedBy,
+            isDeprecated = deprecationInfo.isDeprecated,
+            deprecationMessage = deprecationInfo.message,
+            since = javaDocInfo.since,
+            seeAlso = javaDocInfo.seeAlso
         )
     }
 
     private fun createMethodHoverInfo(method: PsiMethod): HoverInfo {
-        val params = method.parameterList.parameters.joinToString(", ") { 
-            "${it.type.presentableText} ${it.name}" 
+        val params = method.parameterList.parameters.joinToString(", ") {
+            "${it.type.presentableText} ${it.name}"
         }
-        
+
+        // Get throws exceptions
+        val throwsExceptions = method.throwsList.referencedTypes.map { it.presentableText }
+
+        // Find overriding methods
+        val overriddenBy = findOverridingMethods(method)
+
+        // Count method calls
+        val calledByCount = countMethodCalls(method)
+
+        // Calculate complexity
+        val complexity = calculateCyclomaticComplexity(method)
+
+        // Get deprecation info
+        val deprecationInfo = getDeprecationInfo(method)
+
+        // Extract enhanced JavaDoc
+        val javaDocInfo = extractEnhancedJavaDoc(method)
+
         return HoverInfo(
             elementName = method.name,
             elementType = if (method.isConstructor) "constructor" else "method",
             type = method.returnType?.presentableText ?: if (method.isConstructor) "" else "void",
             presentableText = "${method.name}($params): ${method.returnType?.presentableText ?: "void"}",
-            javaDoc = extractJavaDoc(method),
+            javaDoc = javaDocInfo.fullDoc,
             signature = buildMethodSignature(method),
-            modifiers = extractModifiers(method.modifierList)
+            modifiers = extractModifiers(method.modifierList),
+            throwsExceptions = throwsExceptions,
+            overriddenBy = overriddenBy,
+            calledByCount = calledByCount,
+            complexity = complexity,
+            isDeprecated = deprecationInfo.isDeprecated,
+            deprecationMessage = deprecationInfo.message,
+            since = javaDocInfo.since,
+            seeAlso = javaDocInfo.seeAlso
         )
     }
 
     private fun createFieldHoverInfo(field: PsiField): HoverInfo {
+        val deprecationInfo = getDeprecationInfo(field)
+        val javaDocInfo = extractEnhancedJavaDoc(field)
+        val calledByCount = countFieldUsage(field)
+
         return HoverInfo(
             elementName = field.name ?: "anonymous",
             elementType = "field",
             type = field.type.presentableText,
             presentableText = "${field.name}: ${field.type.presentableText}",
-            javaDoc = extractJavaDoc(field),
+            javaDoc = javaDocInfo.fullDoc,
             signature = "${field.type.presentableText} ${field.name}",
-            modifiers = extractModifiers(field.modifierList)
+            modifiers = extractModifiers(field.modifierList),
+            calledByCount = calledByCount,
+            isDeprecated = deprecationInfo.isDeprecated,
+            deprecationMessage = deprecationInfo.message,
+            since = javaDocInfo.since,
+            seeAlso = javaDocInfo.seeAlso
         )
     }
 
@@ -151,7 +222,7 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
             is PsiLocalVariable -> "variable"
             else -> "variable"
         }
-        
+
         return HoverInfo(
             elementName = variable.name ?: "anonymous",
             elementType = varType,
@@ -207,32 +278,34 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
             psiClass.isAnnotationType -> "@interface"
             else -> "class"
         }
-        val extends = psiClass.extendsList?.referencedTypes?.firstOrNull()?.presentableText?.let { " extends $it" } ?: ""
-        val implements = psiClass.implementsList?.referencedTypes?.joinToString(", ") { it.presentableText }?.let { " implements $it" } ?: ""
-        
+        val extends =
+            psiClass.extendsList?.referencedTypes?.firstOrNull()?.presentableText?.let { " extends $it" } ?: ""
+        val implements = psiClass.implementsList?.referencedTypes?.joinToString(", ") { it.presentableText }
+            ?.let { " implements $it" } ?: ""
+
         return "$modifiers $type ${psiClass.name}$extends$implements".trim()
     }
 
     private fun buildMethodSignature(method: PsiMethod): String {
-        val params = method.parameterList.parameters.joinToString(", ") { 
-            "${it.type.presentableText} ${it.name}" 
+        val params = method.parameterList.parameters.joinToString(", ") {
+            "${it.type.presentableText} ${it.name}"
         }
         val returnType = if (method.isConstructor) "" else "${method.returnType?.presentableText ?: "void"} "
         val modifiers = method.modifierList.text
         val throws = method.throwsList.referencedTypes.takeIf { it.isNotEmpty() }
             ?.joinToString(", ") { it.presentableText }
             ?.let { " throws $it" } ?: ""
-        
+
         return "$modifiers $returnType${method.name}($params)$throws".trim()
     }
 
     private fun extractJavaDoc(element: PsiDocCommentOwner): String? {
         val docComment = element.docComment ?: return null
-        
+
         // Build JavaDoc string
         val builder = StringBuilder()
         builder.append("/**\n")
-        
+
         // Add description
         val descriptionElements = docComment.descriptionElements
         if (descriptionElements.isNotEmpty()) {
@@ -240,7 +313,7 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
             builder.append(descriptionElements.joinToString("") { it.text }.trim())
             builder.append("\n")
         }
-        
+
         // Add tags
         docComment.tags.forEach { tag ->
             builder.append(" * @${tag.name}")
@@ -249,7 +322,7 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
             }
             builder.append("\n")
         }
-        
+
         builder.append(" */")
         return builder.toString()
     }
@@ -270,5 +343,186 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
             PsiModifier.NATIVE,
             PsiModifier.STRICTFP
         ).filter { modifierList.hasModifierProperty(it) }
+    }
+
+    private data class JavaDocInfo(
+        val fullDoc: String?,
+        val since: String? = null,
+        val seeAlso: List<String> = emptyList()
+    )
+
+    private data class DeprecationInfo(
+        val isDeprecated: Boolean,
+        val message: String? = null
+    )
+
+    private fun findImplementors(psiClass: PsiClass): List<String> {
+        val scope = GlobalSearchScope.projectScope(psiClass.project)
+        return try {
+            ClassInheritorsSearch.search(psiClass, scope, false)
+                .findAll()
+                .take(10) // Limit to prevent performance issues
+                .mapNotNull { it.qualifiedName }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun findOverridingMethods(method: PsiMethod): List<String> {
+        val scope = GlobalSearchScope.projectScope(method.project)
+        return try {
+            OverridingMethodsSearch.search(method, scope, false)
+                .findAll()
+                .take(10) // Limit to prevent performance issues
+                .map { "${it.containingClass?.qualifiedName}.${it.name}" }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun countMethodCalls(method: PsiMethod): Int {
+        val scope = GlobalSearchScope.projectScope(method.project)
+        return try {
+            var count = 0
+            ReferencesSearch.search(method, scope).forEach { _ ->
+                count++
+                if (count > 100) return 100 // Cap at 100 for performance
+            }
+            count
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    private fun countFieldUsage(field: PsiField): Int {
+        val scope = GlobalSearchScope.projectScope(field.project)
+        return try {
+            var count = 0
+            ReferencesSearch.search(field, scope).forEach { _ ->
+                count++
+                if (count > 100) return 100 // Cap at 100 for performance
+            }
+            count
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    private fun calculateCyclomaticComplexity(method: PsiMethod): Int? {
+        val body = method.body ?: return null
+        var complexity = 1 // Base complexity
+
+        body.accept(object : JavaRecursiveElementWalkingVisitor() {
+            override fun visitIfStatement(statement: PsiIfStatement) {
+                complexity++
+                super.visitIfStatement(statement)
+            }
+
+            override fun visitWhileStatement(statement: PsiWhileStatement) {
+                complexity++
+                super.visitWhileStatement(statement)
+            }
+
+            override fun visitForStatement(statement: PsiForStatement) {
+                complexity++
+                super.visitForStatement(statement)
+            }
+
+            override fun visitForeachStatement(statement: PsiForeachStatement) {
+                complexity++
+                super.visitForeachStatement(statement)
+            }
+
+            override fun visitSwitchLabelStatement(statement: PsiSwitchLabelStatement) {
+                if (statement.isDefaultCase == false) {
+                    complexity++
+                }
+                super.visitSwitchLabelStatement(statement)
+            }
+
+            override fun visitConditionalExpression(expression: PsiConditionalExpression) {
+                complexity++
+                super.visitConditionalExpression(expression)
+            }
+
+            override fun visitCatchSection(section: PsiCatchSection) {
+                complexity++
+                super.visitCatchSection(section)
+            }
+
+            override fun visitPolyadicExpression(expression: PsiPolyadicExpression) {
+                if (expression.operationTokenType == JavaTokenType.ANDAND ||
+                    expression.operationTokenType == JavaTokenType.OROR
+                ) {
+                    complexity += expression.operands.size - 1
+                }
+                super.visitPolyadicExpression(expression)
+            }
+        })
+
+        return complexity
+    }
+
+    private fun getDeprecationInfo(element: PsiModifierListOwner): DeprecationInfo {
+        val isDeprecated = element.hasAnnotation("java.lang.Deprecated")
+        if (!isDeprecated) {
+            return DeprecationInfo(false)
+        }
+
+        // Try to extract deprecation message from JavaDoc
+        val docComment = (element as? PsiDocCommentOwner)?.docComment
+        val deprecatedTag = docComment?.findTagByName("deprecated")
+        val message = deprecatedTag?.dataElements?.joinToString("") { it.text }?.trim()
+
+        return DeprecationInfo(true, message)
+    }
+
+    private fun extractEnhancedJavaDoc(element: PsiDocCommentOwner): JavaDocInfo {
+        val docComment = element.docComment ?: return JavaDocInfo(null)
+
+        // Build JavaDoc string
+        val builder = StringBuilder()
+        builder.append("/**\n")
+
+        // Add description
+        val descriptionElements = docComment.descriptionElements
+        if (descriptionElements.isNotEmpty()) {
+            builder.append(" * ")
+            builder.append(descriptionElements.joinToString("") { it.text }.trim())
+            builder.append("\n")
+        }
+
+        var since: String? = null
+        val seeAlso = mutableListOf<String>()
+
+        // Add tags and extract special ones
+        docComment.tags.forEach { tag ->
+            when (tag.name) {
+                "since" -> {
+                    since = tag.dataElements.joinToString("") { it.text }.trim()
+                }
+
+                "see" -> {
+                    val seeText = tag.dataElements.joinToString("") { it.text }.trim()
+                    if (seeText.isNotEmpty()) {
+                        seeAlso.add(seeText)
+                    }
+                }
+            }
+
+            builder.append(" * @${tag.name}")
+            tag.dataElements.forEach { data ->
+                builder.append(" ${data.text}")
+            }
+            builder.append("\n")
+        }
+
+        builder.append(" */")
+
+        return JavaDocInfo(
+            fullDoc = builder.toString(),
+            since = since,
+            seeAlso = seeAlso
+        )
     }
 }

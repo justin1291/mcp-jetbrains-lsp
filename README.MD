@@ -10,6 +10,56 @@ This plugin provides MCP tools that expose IntelliJ's powerful code analysis fea
 - Find all usages of symbols (find references)
 - Get type information and documentation (hover info)
 
+## Using with Claude Code
+
+### Quick Setup
+1. Install this plugin in IntelliJ IDEA (see Installation below)
+2. Add to your Claude Code MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "intellij": {
+      "command": "intellij-mcp-server",
+      "args": ["--port", "9999"]
+    }
+  }
+}
+```
+
+3. Restart Claude Code and open your IntelliJ project
+
+### Example: Refactoring a Method Safely
+
+**Before:** Claude Code can see your files but can't understand code relationships:
+```
+❌ "Can I rename this method safely?" → Claude guesses based on text search
+❌ Risk missing usages in other files or breaking code
+```
+
+**After:** Claude Code has IDE-level intelligence:
+```bash
+# Claude can now systematically analyze your code:
+$ claude "Can I safely rename the processUserData method?"
+
+> Let me analyze this method and its usages...
+> 
+> Using get_symbols_in_file on UserService.java...
+> Found processUserData at line 45
+> 
+> Using find_symbol_references for processUserData...
+> Found 8 usages across 4 files:
+> - UserController.java:23 (method_call)
+> - DataProcessor.java:67 (method_call) 
+> - UserServiceTest.java:15,28 (method_calls in tests)
+> - ApiDocumentation.md:102 (documentation reference)
+>
+> ✅ Safe to rename! All usages are in your project.
+> ⚠️  Don't forget to update the documentation reference.
+```
+
+**The difference:** Claude Code now understands your codebase structure and can make informed decisions about refactoring, debugging, and code changes using the same analysis tools your IDE provides.
+
 ## Installation
 
 ### From Source

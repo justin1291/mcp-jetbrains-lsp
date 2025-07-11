@@ -3,7 +3,9 @@ package dev.mcp.extensions.lsp.tools
 import dev.mcp.extensions.lsp.BaseTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import kotlin.test.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class GetSymbolsInFileToolTest : BaseTest() {
     
@@ -496,6 +498,105 @@ class GetSymbolsInFileToolTest : BaseTest() {
     }
 
     @Test
+    fun testNewMetadataFields() {
+        // Test new metadata fields using the enhanced User.java file
+        val userPath = "src/main/java/com/example/demo/User.java"
+        
+        val args = GetSymbolsArgs(
+            filePath = userPath,
+            hierarchical = false
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val symbols: List<SymbolInfo> = parseJsonResponse(response.status)
+        
+        // Test isDeprecated field
+        val oldDefaultRole = symbols.find { it.name == "OLD_DEFAULT_ROLE" }
+        assertNotNull(oldDefaultRole, "Should find OLD_DEFAULT_ROLE")
+        assertTrue(oldDefaultRole.isDeprecated, "OLD_DEFAULT_ROLE should be marked as deprecated")
+        
+        val validateMethod = symbols.find { it.name == "validate" }
+        assertNotNull(validateMethod, "Should find validate method")
+        assertTrue(validateMethod.isDeprecated, "validate method should be marked as deprecated")
+        
+        // Test hasJavadoc field
+        assertTrue(oldDefaultRole.hasJavadoc, "OLD_DEFAULT_ROLE should have JavaDoc")
+        
+        val toStringMethod = symbols.find { it.name == "toString" && it.kind == "method" }
+        assertNotNull(toStringMethod, "Should find toString method")
+        assertTrue(toStringMethod.hasJavadoc, "toString method should have JavaDoc")
+        
+        // Test isOverride field
+        assertTrue(toStringMethod.isOverride, "toString should be marked as override")
+        
+        val equalsMethod = symbols.find { it.name == "equals" }
+        assertNotNull(equalsMethod, "Should find equals method")
+        assertTrue(equalsMethod.isOverride, "equals should be marked as override")
+        
+        val hashCodeMethod = symbols.find { it.name == "hashCode" }
+        assertNotNull(hashCodeMethod, "Should find hashCode method")
+        assertTrue(hashCodeMethod.isOverride, "hashCode should be marked as override")
+        
+        // Test overrides field
+        assertEquals("java.lang.Object.toString", toStringMethod.overrides, 
+            "toString should override Object.toString")
+        assertEquals("java.lang.Object.equals", equalsMethod.overrides, 
+            "equals should override Object.equals")
+        assertEquals("java.lang.Object.hashCode", hashCodeMethod.overrides, 
+            "hashCode should override Object.hashCode")
+        
+        // Test visibility field
+        assertEquals("protected", oldDefaultRole.visibility, "OLD_DEFAULT_ROLE should be protected")
+        assertEquals("protected", validateMethod.visibility, "validate method should be protected")
+        
+        val updateTimestamp = symbols.find { it.name == "updateTimestamp" }
+        assertNotNull(updateTimestamp, "Should find updateTimestamp method")
+        assertEquals("private", updateTimestamp.visibility, "updateTimestamp should be private")
+        
+        val notifyChange = symbols.find { it.name == "notifyChange" }
+        assertNotNull(notifyChange, "Should find notifyChange method")
+        assertEquals("package-private", notifyChange.visibility, 
+            "notifyChange should be package-private")
+        
+        // Test visibility for public methods
+        val getId = symbols.find { it.name == "getId" }
+        assertNotNull(getId, "Should find getId method")
+        assertEquals("public", getId.visibility, "getId should be public")
+        
+        // Test annotations field
+        assertTrue(oldDefaultRole.annotations.isNotEmpty(), 
+            "OLD_DEFAULT_ROLE should have annotations")
+        assertTrue(oldDefaultRole.annotations.contains("@Deprecated"), 
+            "OLD_DEFAULT_ROLE annotations should include @Deprecated")
+        
+        assertTrue(toStringMethod.annotations.isNotEmpty(), 
+            "toString should have annotations")
+        assertTrue(toStringMethod.annotations.contains("@Override"), 
+            "toString annotations should include @Override")
+        
+        assertTrue(validateMethod.annotations.isNotEmpty(), 
+            "validate should have annotations")
+        assertTrue(validateMethod.annotations.contains("@Deprecated"), 
+            "validate annotations should include @Deprecated")
+        assertTrue(validateMethod.annotations.contains("@SuppressWarnings"), 
+            "validate annotations should include @SuppressWarnings")
+        
+        // Check BaseEntity class is also found (from extends)
+        val baseEntityClass = symbols.find { it.name == "BaseEntity" && it.kind == "class" }
+        assertNotNull(baseEntityClass, "Should find BaseEntity class")
+        assertTrue(baseEntityClass.hasJavadoc, "BaseEntity should have JavaDoc")
+        assertEquals("package-private", baseEntityClass.visibility, 
+            "BaseEntity should be package-private (no modifier = package-private)")
+    }
+
+    @Test
     fun testNestedClassExtraction() {
         // Test nested class extraction from ApiController (ApiResponse is nested)
         val apiControllerPath = "src/main/java/com/example/demo/ApiController.java"
@@ -523,5 +624,81 @@ class GetSymbolsInFileToolTest : BaseTest() {
         if (apiResponse != null) {
             assertEquals("class", apiResponse.kind, "ApiResponse should be a class")
         }
+    }
+
+    @Test
+    fun testHierarchicalMetadataFields() {
+        val userServicePath = "src/main/java/com/example/demo/UserService.java"
+        
+        val args = GetSymbolsArgs(
+            filePath = userServicePath,
+            hierarchical = true
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val symbols: List<SymbolInfo> = parseJsonResponse(response.status)
+        
+        // Find the main UserService class
+        val mainClass = symbols.find { it.name == "UserService" && it.kind == "class" }
+        assertNotNull(mainClass, "Should find UserService class")
+        assertTrue(mainClass.hasJavadoc, "Main class should have JavaDoc")
+        assertTrue(mainClass.annotations.isNotEmpty(), 
+            "Main class should have annotations (@SuppressWarnings)")
+        assertEquals("public", mainClass.visibility, "Main class should be public")
+        
+        // Check children
+        assertNotNull(mainClass.children, "Main class should have children")
+        
+        // Check deprecated field in main class
+        val maxUsersField = mainClass.children?.find { it.name == "MAX_USERS" }
+        assertNotNull(maxUsersField, "Should find MAX_USERS field")
+        assertTrue(maxUsersField.isDeprecated, "MAX_USERS should be deprecated")
+        assertTrue(maxUsersField.hasJavadoc, "MAX_USERS should have JavaDoc")
+        assertEquals("public", maxUsersField.visibility, "MAX_USERS should be public")
+        
+        // Find UserEvent enum in children
+        val userEventEnum = mainClass.children?.find { it.name == "UserEvent" && it.kind == "enum" }
+        assertNotNull(userEventEnum, "Should find UserEvent enum as child")
+        assertTrue(userEventEnum.hasJavadoc, "UserEvent should have JavaDoc")
+        assertEquals("public", userEventEnum.visibility, "UserEvent should be public")
+        
+        // Find UserListener interface in children
+        val userListenerInterface = mainClass.children?.find { it.name == "UserListener" && it.kind == "interface" }
+        assertNotNull(userListenerInterface, "Should find UserListener interface as child")
+        assertTrue(userListenerInterface.hasJavadoc, "UserListener should have JavaDoc")
+        assertEquals("public", userListenerInterface.visibility, "UserListener should be public")
+        
+        // Find UserSession inner class
+        val userSessionClass = mainClass.children?.find { it.name == "UserSession" && it.kind == "class" }
+        assertNotNull(userSessionClass, "Should find UserSession class as child")
+        assertTrue(userSessionClass.hasJavadoc, "UserSession should have JavaDoc")
+        assertEquals("public", userSessionClass.visibility, "UserSession should be public")
+        
+        // Check different visibility methods
+        val protectedMethod = mainClass.children?.find { it.name == "notifyListeners" }
+        assertNotNull(protectedMethod, "Should find notifyListeners method")
+        assertEquals("protected", protectedMethod.visibility, "notifyListeners should be protected")
+        
+        val packagePrivateMethod = mainClass.children?.find { it.name == "addListener" }
+        assertNotNull(packagePrivateMethod, "Should find addListener method")
+        assertEquals("package-private", packagePrivateMethod.visibility, 
+            "addListener should be package-private")
+        
+        val privateMethod = mainClass.children?.find { it.name == "validateUser" }
+        assertNotNull(privateMethod, "Should find validateUser method")
+        assertEquals("private", privateMethod.visibility, "validateUser should be private")
+        
+        // Check deprecated method
+        val deprecatedMethod = mainClass.children?.find { it.name == "getUser" && it.kind == "method" }
+        assertNotNull(deprecatedMethod, "Should find deprecated getUser method")
+        assertTrue(deprecatedMethod.isDeprecated, "getUser should be deprecated")
+        assertTrue(deprecatedMethod.hasJavadoc, "getUser should have JavaDoc")
     }
 }

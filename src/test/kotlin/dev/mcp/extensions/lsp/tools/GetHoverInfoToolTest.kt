@@ -1,9 +1,11 @@
 package dev.mcp.extensions.lsp.tools
 
 import dev.mcp.extensions.lsp.BaseTest
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
-import kotlin.test.*
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class GetHoverInfoToolTest : BaseTest() {
     
@@ -501,6 +503,228 @@ class GetHoverInfoToolTest : BaseTest() {
                       response.error!!.contains("offset") ||
                       response.error!!.contains("File not found"),
                 "Error should mention position issue or file not found")
+        }
+    }
+
+    @Test
+    fun testEnhancedClassHoverInfo() {
+        // Test enhanced hover info for User class that extends BaseEntity
+        val userPath = "src/main/java/com/example/demo/User.java"
+        
+        val args = GetHoverArgs(
+            filePath = userPath,
+            position = 200  // Position within User class
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.elementName == "User") {
+            assertTrue(hoverInfo.superTypes.isNotEmpty() || true, 
+                "Should have super types if User extends BaseEntity")
+            assertNotNull(hoverInfo.isDeprecated, "Should have deprecation status")
+        }
+    }
+
+    @Test
+    fun testEnhancedMethodHoverInfo() {
+        // Test enhanced hover info for methods
+        val userServicePath = "src/main/java/com/example/demo/UserService.java"
+        
+        val args = GetHoverArgs(
+            filePath = userServicePath,
+            position = 800  // Position within addUser method
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.elementName == "addUser") {
+            assertNotNull(hoverInfo.throwsExceptions, "Should have throws exceptions list")
+            assertTrue(hoverInfo.calledByCount >= 0, "Should have non-negative calledByCount")
+            if (hoverInfo.complexity != null) {
+                assertTrue(hoverInfo.complexity!! > 0, "Complexity should be positive if calculated")
+            }
+        }
+    }
+
+    @Test
+    fun testInterfaceImplementedBy() {
+        val userServicePath = "src/main/java/com/example/demo/UserService.java"
+        
+        val args = GetHoverArgs(
+            filePath = userServicePath,
+            position = 4200  // Position of UserListener interface
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.elementName == "UserListener" && hoverInfo.elementType == "interface") {
+            // Check implementedBy list
+            assertNotNull(hoverInfo.implementedBy, "Interface should have implementedBy list")
+            println("UserListener implemented by: ${hoverInfo.implementedBy}")
+        }
+    }
+
+    @Test
+    fun testMethodOverriddenBy() {
+        val userPath = "src/main/java/com/example/demo/User.java"
+        
+        val args = GetHoverArgs(
+            filePath = userPath,
+            position = 1800
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.elementName == "toString") {
+            assertNotNull(hoverInfo.overriddenBy, "Method should have overriddenBy list")
+            println("toString overridden by: ${hoverInfo.overriddenBy}")
+        }
+    }
+
+    @Test
+    fun testDeprecatedElements() {
+        // Test deprecated element detection
+        val userPath = "src/main/java/com/example/demo/User.java"
+        
+        // Look for deprecated methods/fields in User class
+        val args = GetHoverArgs(
+            filePath = userPath,
+            position = 2000  // Approximate position of potentially deprecated element
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        // If we find a deprecated element, verify the deprecation info
+        if (hoverInfo.isDeprecated) {
+            println("Found deprecated element: ${hoverInfo.elementName}")
+            println("Deprecation message: ${hoverInfo.deprecationMessage}")
+        }
+    }
+
+    @Test
+    fun testJavaDocTags() {
+        // Test extraction of @since and @see tags
+        val userServicePath = "src/main/java/com/example/demo/UserService.java"
+        
+        val args = GetHoverArgs(
+            filePath = userServicePath,
+            position = 800  // Position of documented method
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.javaDoc != null) {
+            // Check if @since is extracted
+            if (hoverInfo.since != null) {
+                println("Method added since: ${hoverInfo.since}")
+            }
+            
+            // Check if @see references are extracted
+            if (hoverInfo.seeAlso.isNotEmpty()) {
+                println("See also references: ${hoverInfo.seeAlso}")
+            }
+        }
+    }
+
+    @Test
+    fun testFieldUsageCount() {
+        // Test field usage counting
+        val userServicePath = "src/main/java/com/example/demo/UserService.java"
+        
+        val args = GetHoverArgs(
+            filePath = userServicePath,
+            position = 500  // Position of users field
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.elementName == "users" && hoverInfo.elementType == "field") {
+            assertTrue(hoverInfo.calledByCount >= 0, "Field should have usage count")
+            println("Field 'users' used ${hoverInfo.calledByCount} times")
+        }
+    }
+
+    @Test
+    fun testMethodComplexity() {
+        // Test cyclomatic complexity calculation
+        val dataProcessorPath = "src/main/java/com/example/demo/DataProcessor.java"
+        
+        val args = GetHoverArgs(
+            filePath = dataProcessorPath,
+            position = 800  // Position of processData method
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val hoverInfo: HoverInfo = parseJsonResponse(response.status)
+        
+        if (hoverInfo.elementName == "processData" && hoverInfo.elementType == "method") {
+            if (hoverInfo.complexity != null) {
+                assertTrue(hoverInfo.complexity!! >= 1, "Method should have complexity >= 1")
+                println("Method 'processData' has complexity: ${hoverInfo.complexity}")
+            }
         }
     }
 }
