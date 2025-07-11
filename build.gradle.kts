@@ -26,8 +26,12 @@ dependencies {
         bundledPlugin("com.intellij.java")
     }
 
-    // Add Kotlin serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    // IMPORTANT: Use compileOnly for kotlinx-serialization to avoid class loader conflicts
+    // The MCP Server plugin already provides this dependency at runtime
+    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    
+    // For tests, we need the actual implementation
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Test dependencies
     testImplementation(kotlin("test"))
@@ -66,7 +70,7 @@ tasks {
         targetCompatibility = "21"
     }
 
-test {
+    test {
         // Use JUnit Platform (JUnit 5)
         useJUnitPlatform()
 
