@@ -1,6 +1,8 @@
 package dev.mcp.extensions.lsp.tools
 
 import dev.mcp.extensions.lsp.BaseTest
+import dev.mcp.extensions.lsp.core.models.GetHoverArgs
+import dev.mcp.extensions.lsp.core.models.HoverInfo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals

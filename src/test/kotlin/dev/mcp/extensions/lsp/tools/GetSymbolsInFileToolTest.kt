@@ -1,6 +1,8 @@
 package dev.mcp.extensions.lsp.tools
 
 import dev.mcp.extensions.lsp.BaseTest
+import dev.mcp.extensions.lsp.core.models.GetSymbolsArgs
+import dev.mcp.extensions.lsp.core.models.SymbolInfo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals

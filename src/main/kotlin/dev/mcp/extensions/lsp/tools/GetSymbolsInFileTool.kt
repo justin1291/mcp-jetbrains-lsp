@@ -1,45 +1,23 @@
 package dev.mcp.extensions.lsp.tools
 
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VfsUtil
-import com.intellij.psi.*
-import kotlinx.serialization.Serializable
+import dev.mcp.extensions.lsp.core.factories.SymbolExtractorFactory
+import dev.mcp.extensions.lsp.core.models.GetSymbolsArgs
+import dev.mcp.extensions.lsp.core.utils.PsiUtils
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.ide.mcp.Response
 import org.jetbrains.mcpserverplugin.AbstractMcpTool
-import java.io.File
 
-@Serializable
-data class GetSymbolsArgs(
-    val filePath: String,
-    val hierarchical: Boolean = true,
-    val symbolTypes: List<String>? = null,
-    val includeImports: Boolean = false
-)
-
-@Serializable
-data class SymbolInfo(
-    val name: String,
-    val type: String,
-    val kind: String,
-    val startOffset: Int,
-    val endOffset: Int,
-    val lineNumber: Int,
-    val modifiers: List<String> = emptyList(),
-    val parameters: List<String>? = null,
-    val returnType: String? = null,
-    val children: List<SymbolInfo>? = null,  // For hierarchical structure
-    val isDeprecated: Boolean = false,
-    val hasJavadoc: Boolean = false,
-    val isOverride: Boolean = false,
-    val overrides: String? = null,
-    val visibility: String = "package-private",
-    val annotations: List<String> = emptyList()
-)
-
+/**
+ * MCP tool for extracting symbols from files.
+ * Delegates to language-specific implementations via SymbolExtractorFactory.
+ */
 class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.serializer()) {
+    private val logger = Logger.getInstance(GetSymbolsInFileTool::class.java)
+
     override val name: String = "get_symbols_in_file"
     override val description: String = """
         🔑 START HERE: Extract all symbols (classes, methods, fields, etc.) from a specific file.
@@ -79,255 +57,100 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
         - find_symbol_references: Find all usages of symbols
         - get_hover_info: Get detailed type information
         
+        Supported languages: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}
+        
         Returns a list of symbols with their locations, types, modifiers, and important metadata.
         Always start here to understand a file before making changes.
     """.trimIndent()
 
+    /**
+     * Handles the symbol extraction request for a file.
+     *
+     * @param project The IntelliJ project context
+     * @param args The arguments containing file path and extraction options
+     * @return Response containing extracted symbols or error message
+     */
     override fun handle(project: Project, args: GetSymbolsArgs): Response {
         return ReadAction.compute<Response, Exception> {
-            try {
-                val file = File(project.basePath, args.filePath)
-                if (!file.exists()) {
-                    return@compute Response(null, "File not found: ${args.filePath}")
-                }
+            measureOperation("get_symbols_in_file") {
+                try {
+                    logger.info("Processing symbols request for file: ${args.filePath}")
+                    logger.debug(
+                        "Parameters: hierarchical=${args.hierarchical}, " +
+                                "symbolTypes=${args.symbolTypes}, " +
+                                "includeImports=${args.includeImports}"
+                    )
 
-                val psiFile = PsiManager.getInstance(project).findFile(
-                    VfsUtil.findFileByIoFile(file, true) ?: return@compute Response(null, "Cannot find file in VFS")
-                ) ?: return@compute Response(null, "Cannot parse file")
+                    if (!PsiUtils.fileExists(project, args.filePath)) {
+                        logger.warn("File not found: ${args.filePath}")
+                        return@measureOperation Response(null, "File not found: ${args.filePath}")
+                    }
 
-                val symbols = if (args.hierarchical) {
-                    extractSymbolsHierarchical(psiFile, args)
-                } else {
-                    extractSymbolsFlat(psiFile, args)
-                }
+                    val psiFile = PsiUtils.getPsiFile(project, args.filePath)
+                    if (psiFile == null) {
+                        logger.error("Cannot parse file: ${args.filePath}")
+                        return@measureOperation Response(null, "Cannot parse file: ${args.filePath}")
+                    }
 
-                Response(Json.encodeToString(symbols))
-            } catch (e: Exception) {
-                Response(null, "Error extracting symbols: ${e.message}")
-            }
-        }
-    }
+                    logger.info("File language: ${psiFile.language.displayName} (${psiFile.language.id})")
 
-    private fun extractSymbolsFlat(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
-        val symbols = mutableListOf<SymbolInfo>()
+                    val extractor = try {
+                        SymbolExtractorFactory.getExtractor(psiFile)
+                    } catch (e: UnsupportedOperationException) {
+                        logger.error("Unsupported file type", e)
+                        return@measureOperation Response(
+                            null,
+                            "Unsupported language: ${psiFile.language.displayName}. " +
+                                    "Supported languages: ${
+                                        SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")
+                                    }"
+                        )
+                    }
 
-        // Visit all PSI elements and extract symbols
-        psiFile.accept(object : PsiRecursiveElementVisitor() {
-            override fun visitElement(element: PsiElement) {
-                when (element) {
-                    is PsiClass -> {
-                        if (shouldIncludeSymbol("class", args.symbolTypes)) {
-                            symbols.add(extractClassInfo(element, includeChildren = false))
+                    logger.debug("Using extractor: ${extractor.getSupportedLanguage()}")
+
+                    val symbols = if (args.hierarchical) {
+                        measureOperation("extractSymbolsHierarchical") {
+                            extractor.extractSymbolsHierarchical(psiFile, args)
+                        }
+                    } else {
+                        measureOperation("extractSymbolsFlat") {
+                            extractor.extractSymbolsFlat(psiFile, args)
                         }
                     }
-                    is PsiMethod -> {
-                        if (shouldIncludeSymbol("method", args.symbolTypes)) {
-                            symbols.add(extractMethodInfo(element))
-                        }
-                    }
-                    is PsiField -> {
-                        if (shouldIncludeSymbol("field", args.symbolTypes)) {
-                            symbols.add(extractFieldInfo(element))
-                        }
-                    }
-                    is PsiImportStatement -> {
-                        if (args.includeImports && shouldIncludeSymbol("import", args.symbolTypes)) {
-                            symbols.add(extractImportInfo(element))
-                        }
-                    }
-                }
-                super.visitElement(element)
-            }
-        })
 
-        return symbols
-    }
+                    logger.info("Extracted ${symbols.size} symbols from ${args.filePath}")
 
-    private fun extractSymbolsHierarchical(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
-        val symbols = mutableListOf<SymbolInfo>()
+                    val json = Json.encodeToString(symbols)
+                    logger.debug("Response size: ${json.length} characters")
 
-        // Process imports first if requested
-        if (args.includeImports && shouldIncludeSymbol("import", args.symbolTypes)) {
-            psiFile.children.filterIsInstance<PsiImportList>().forEach { importList ->
-                importList.importStatements.forEach { import ->
-                    symbols.add(extractImportInfo(import))
+                    Response(json)
+                } catch (e: Exception) {
+                    logger.error("Error extracting symbols from ${args.filePath}", e)
+                    Response(null, "Error extracting symbols: ${e.message}")
                 }
             }
         }
+    }
 
-        // Process top-level elements
-        psiFile.children.forEach { element ->
-            when (element) {
-                is PsiClass -> {
-                    if (shouldIncludeSymbol("class", args.symbolTypes)) {
-                        symbols.add(extractClassInfo(element, includeChildren = true, args = args))
-                    }
-                }
-                // Handle other top-level elements if needed
+    /**
+     * Measures the execution time of an operation and logs the result.
+     *
+     * @param operationName Name of the operation for logging
+     * @param block The operation to measure
+     * @return The result of the operation
+     */
+    private fun <T> measureOperation(operationName: String, block: () -> T): T {
+        val start = System.currentTimeMillis()
+        return try {
+            block().also {
+                val duration = System.currentTimeMillis() - start
+                logger.debug("Operation '$operationName' completed in ${duration}ms")
             }
-        }
-
-        return symbols
-    }
-
-    private fun extractClassInfo(psiClass: PsiClass, includeChildren: Boolean = false, args: GetSymbolsArgs? = null): SymbolInfo {
-        val textRange = psiClass.textRange
-        val document = PsiDocumentManager.getInstance(psiClass.project).getDocument(psiClass.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-        
-        val annotations = psiClass.annotations.map { 
-            val name = it.qualifiedName?.substringAfterLast('.') ?: it.text
-            if (name.startsWith("@")) name else "@$name"
-        }
-
-        val children = if (includeChildren && args != null) {
-            val childSymbols = mutableListOf<SymbolInfo>()
-            
-            // Add inner classes
-            psiClass.innerClasses.forEach { innerClass ->
-                if (shouldIncludeSymbol("class", args.symbolTypes)) {
-                    childSymbols.add(extractClassInfo(innerClass, includeChildren = true, args = args))
-                }
-            }
-            
-            // Add methods
-            psiClass.methods.forEach { method ->
-                if (shouldIncludeSymbol("method", args.symbolTypes)) {
-                    childSymbols.add(extractMethodInfo(method))
-                }
-            }
-            
-            // Add fields
-            psiClass.fields.forEach { field ->
-                if (shouldIncludeSymbol("field", args.symbolTypes)) {
-                    childSymbols.add(extractFieldInfo(field))
-                }
-            }
-            
-            childSymbols
-        } else null
-
-        return SymbolInfo(
-            name = psiClass.name ?: "anonymous",
-            type = psiClass.qualifiedName ?: psiClass.name ?: "unknown",
-            kind = when {
-                psiClass.isInterface -> "interface"
-                psiClass.isEnum -> "enum"
-                psiClass.isAnnotationType -> "annotation"
-                else -> "class"
-            },
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1, // Convert to 1-based
-            modifiers = extractModifiers(psiClass.modifierList),
-            children = children,
-            isDeprecated = psiClass.hasAnnotation("java.lang.Deprecated"),
-            hasJavadoc = psiClass.docComment != null,
-            visibility = getVisibility(psiClass.modifierList),
-            annotations = annotations
-        )
-    }
-
-    private fun extractMethodInfo(psiMethod: PsiMethod): SymbolInfo {
-        val textRange = psiMethod.textRange
-        val document = PsiDocumentManager.getInstance(psiMethod.project).getDocument(psiMethod.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-        
-        val superMethods = psiMethod.findSuperMethods()
-        val annotations = psiMethod.annotations.map { 
-            val name = it.qualifiedName?.substringAfterLast('.') ?: it.text
-            if (name.startsWith("@")) name else "@$name"
-        }
-
-        return SymbolInfo(
-            name = psiMethod.name,
-            type = "${psiMethod.containingClass?.qualifiedName ?: "unknown"}.${psiMethod.name}",
-            kind = if (psiMethod.isConstructor) "constructor" else "method",
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1,
-            modifiers = extractModifiers(psiMethod.modifierList),
-            parameters = psiMethod.parameterList.parameters.map { param ->
-                "${param.type.presentableText} ${param.name}"
-            },
-            returnType = psiMethod.returnType?.presentableText,
-            isDeprecated = psiMethod.hasAnnotation("java.lang.Deprecated"),
-            hasJavadoc = psiMethod.docComment != null,
-            isOverride = psiMethod.hasAnnotation("java.lang.Override") || superMethods.isNotEmpty(),
-            overrides = superMethods.firstOrNull()?.let { 
-                "${it.containingClass?.qualifiedName}.${it.name}"
-            },
-            visibility = getVisibility(psiMethod.modifierList),
-            annotations = annotations
-        )
-    }
-
-    private fun extractFieldInfo(psiField: PsiField): SymbolInfo {
-        val textRange = psiField.textRange
-        val document = PsiDocumentManager.getInstance(psiField.project).getDocument(psiField.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-        
-        val annotations = psiField.annotations.map { 
-            val name = it.qualifiedName?.substringAfterLast('.') ?: it.text
-            if (name.startsWith("@")) name else "@$name"
-        }
-
-        return SymbolInfo(
-            name = psiField.name ?: "anonymous",
-            type = psiField.type.presentableText,
-            kind = "field",
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1,
-            modifiers = extractModifiers(psiField.modifierList),
-            isDeprecated = psiField.hasAnnotation("java.lang.Deprecated"),
-            hasJavadoc = psiField.docComment != null,
-            visibility = getVisibility(psiField.modifierList),
-            annotations = annotations
-        )
-    }
-
-    private fun extractImportInfo(psiImport: PsiImportStatement): SymbolInfo {
-        val textRange = psiImport.textRange
-        val document = PsiDocumentManager.getInstance(psiImport.project).getDocument(psiImport.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-
-        return SymbolInfo(
-            name = psiImport.qualifiedName ?: "unknown",
-            type = if (psiImport.isOnDemand) "wildcard-import" else "import",
-            kind = "import",
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1
-        )
-    }
-
-    private fun shouldIncludeSymbol(symbolType: String, filterTypes: List<String>?): Boolean {
-        return filterTypes == null || filterTypes.contains(symbolType)
-    }
-
-    private fun extractModifiers(modifierList: PsiModifierList?): List<String> {
-        if (modifierList == null) return emptyList()
-
-        return listOf(
-            PsiModifier.PUBLIC,
-            PsiModifier.PRIVATE,
-            PsiModifier.PROTECTED,
-            PsiModifier.STATIC,
-            PsiModifier.FINAL,
-            PsiModifier.ABSTRACT,
-            PsiModifier.SYNCHRONIZED,
-            PsiModifier.VOLATILE,
-            PsiModifier.TRANSIENT
-        ).filter { modifierList.hasModifierProperty(it) }
-    }
-    
-    private fun getVisibility(modifierList: PsiModifierList?): String {
-        return when {
-            modifierList?.hasModifierProperty(PsiModifier.PUBLIC) == true -> "public"
-            modifierList?.hasModifierProperty(PsiModifier.PRIVATE) == true -> "private"
-            modifierList?.hasModifierProperty(PsiModifier.PROTECTED) == true -> "protected"
-            else -> "package-private"
+        } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - start
+            logger.error("Operation '$operationName' failed after ${duration}ms", e)
+            throw e
         }
     }
 }
