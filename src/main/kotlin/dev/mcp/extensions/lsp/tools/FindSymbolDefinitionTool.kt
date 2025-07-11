@@ -2,7 +2,9 @@ package dev.mcp.extensions.lsp.tools
 
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiShortNamesCache
@@ -32,31 +34,38 @@ data class DefinitionLocation(
     val signature: String? = null,
     val containingClass: String? = null,
     val modifiers: List<String> = emptyList(),
-    val isAbstract: Boolean = false
+    val isAbstract: Boolean = false,
+    val confidence: Float = 1.0f,
+    val disambiguationHint: String? = null,
+    val isTestCode: Boolean = false,
+    val isLibraryCode: Boolean = false,
+    val accessibilityWarning: String? = null
 )
 
 class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinitionArgs.serializer()) {
     override val name: String = "find_symbol_definition"
     override val description: String = """
-        Navigate to where a symbol is defined (go-to-definition).
+        Go to symbol definition with disambiguation. Find where declared.
         
-        Use this tool when you need to:
-        - Find where a class, method, or field is declared
-        - Jump to the source code of a symbol you're using
-        - Understand the implementation details of a method
-        - Locate the original declaration of any symbol
+        Use when: find declaration, jump to source, understand impl, resolve ambiguous refs
         
-        You can search in two ways:
-        1. By name: Just provide the symbol name (e.g., "ExpenseService")
-        2. By position: Provide the file path and character position of a symbol reference
+        Returns sorted by confidence:
+        - 1.0: exact match/direct ref
+        - 0.95: project member match  
+        - 0.5: library match
+        - lower: partial matches
         
-        Parameters:
-        - symbolName: The name of the symbol to find
-        - filePath: (Optional) File containing the symbol reference
-        - position: (Optional) Character offset of the symbol reference
+        Each result has:
+        - disambiguationHint: "Constructor in UserService", "Static method in Utils"
+        - isTestCode/isLibraryCode flags
+        - accessibilityWarning: "Private member - not accessible"
+        - exact offsets for edits
         
-        Returns the exact location where the symbol is defined, including file path and line number.
-        This is equivalent to Ctrl+Click or F12 in an IDE.
+        Search by:
+        - symbolName: "User" or "ClassName.methodName"
+        - filePath + position: resolve ref at location
+        
+        Better than LSP: confidence scoring, disambiguation, accessibility checks
     """.trimIndent()
 
     override fun handle(project: Project, args: FindDefinitionArgs): Response {
@@ -87,21 +96,42 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
             VfsUtil.findFileByIoFile(file, true) ?: return Response(null, "Cannot find file in VFS")
         ) ?: return Response(null, "Cannot parse file")
 
-        val element = psiFile.findElementAt(position) ?: return Response(Json.encodeToString(emptyList<DefinitionLocation>()))
+        val element =
+            psiFile.findElementAt(position) ?: return Response(Json.encodeToString(emptyList<DefinitionLocation>()))
 
         // Find the reference at this position
         val reference = element.parent?.reference ?: element.reference
         if (reference != null) {
             val resolved = reference.resolve()
             if (resolved != null) {
-                return Response(Json.encodeToString(listOf(createLocation(resolved))))
+                val location = createLocation(resolved)
+                return Response(
+                    Json.encodeToString(
+                        listOf(
+                            location.copy(
+                                confidence = 1.0f, // Direct reference resolution
+                                disambiguationHint = generateDisambiguationHint(resolved)
+                            )
+                        )
+                    )
+                )
             }
         }
 
         // Try to find a named element at this position
         val namedElement = PsiTreeUtil.getParentOfType(element, PsiNamedElement::class.java)
         if (namedElement != null) {
-            return Response(Json.encodeToString(listOf(createLocation(namedElement))))
+            val location = createLocation(namedElement)
+            return Response(
+                Json.encodeToString(
+                    listOf(
+                        location.copy(
+                            confidence = 0.9f, // Found at position but not through reference
+                            disambiguationHint = generateDisambiguationHint(namedElement)
+                        )
+                    )
+                )
+            )
         }
 
         return Response(Json.encodeToString(emptyList<DefinitionLocation>()))
@@ -121,28 +151,59 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
             val classes = JavaPsiFacade.getInstance(project).findClasses(className, scope)
             for (psiClass in classes) {
                 val methods = psiClass.findMethodsByName(methodName, true)
-                methods.forEach { definitions.add(createLocation(it)) }
+                methods.forEach {
+                    val location = createLocation(it, symbolName)
+                    definitions.add(
+                        location.copy(
+                            confidence = 1.0f, // Exact qualified match
+                            disambiguationHint = "Method in ${psiClass.qualifiedName}"
+                        )
+                    )
+                }
             }
         } else {
             // Search for classes
             val psiClasses = JavaPsiFacade.getInstance(project).findClasses(symbolName, scope)
-            psiClasses.forEach { definitions.add(createLocation(it)) }
+            psiClasses.forEach {
+                val location = createLocation(it, symbolName)
+                definitions.add(
+                    location.copy(
+                        confidence = calculateConfidence(it, symbolName, isClass = true),
+                        disambiguationHint = generateDisambiguationHint(it)
+                    )
+                )
+            }
 
             // Search for methods
-            cache.getMethodsByName(symbolName, scope).forEach { 
-                definitions.add(createLocation(it)) 
+            cache.getMethodsByName(symbolName, scope).forEach {
+                val location = createLocation(it, symbolName)
+                definitions.add(
+                    location.copy(
+                        confidence = calculateConfidence(it, symbolName, isClass = false),
+                        disambiguationHint = generateDisambiguationHint(it)
+                    )
+                )
             }
 
             // Search for fields
-            cache.getFieldsByName(symbolName, scope).forEach { 
-                definitions.add(createLocation(it)) 
+            cache.getFieldsByName(symbolName, scope).forEach {
+                val location = createLocation(it, symbolName)
+                definitions.add(
+                    location.copy(
+                        confidence = calculateConfidence(it, symbolName, isClass = false),
+                        disambiguationHint = generateDisambiguationHint(it)
+                    )
+                )
             }
         }
 
-        return Response(Json.encodeToString(definitions))
+        // Sort by confidence (highest first)
+        val sortedDefinitions = definitions.sortedByDescending { it.confidence }
+
+        return Response(Json.encodeToString(sortedDefinitions))
     }
 
-    private fun createLocation(element: PsiElement): DefinitionLocation {
+    private fun createLocation(element: PsiElement, searchTerm: String? = null): DefinitionLocation {
         val containingFile = element.containingFile
         val virtualFile = containingFile.virtualFile
         val project = element.project
@@ -152,6 +213,13 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
         val textRange = element.textRange
         val document = PsiDocumentManager.getInstance(project).getDocument(containingFile)
         val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
+
+        // Check if in test or library code
+        val isTestCode = isInTestCode(virtualFile)
+        val isLibraryCode = isInLibraryCode(virtualFile, project)
+
+        // Generate accessibility warning
+        val accessibilityWarning = generateAccessibilityWarning(element)
 
         return when (element) {
             is PsiClass -> DefinitionLocation(
@@ -169,8 +237,13 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
                 signature = buildClassSignature(element),
                 containingClass = element.containingClass?.qualifiedName,
                 modifiers = extractModifiers(element.modifierList),
-                isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT)
+                isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT),
+                isTestCode = isTestCode,
+                isLibraryCode = isLibraryCode,
+
+                accessibilityWarning = accessibilityWarning
             )
+
             is PsiMethod -> DefinitionLocation(
                 name = element.name,
                 filePath = relativePath,
@@ -181,8 +254,13 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
                 signature = buildMethodSignature(element),
                 containingClass = element.containingClass?.qualifiedName,
                 modifiers = extractModifiers(element.modifierList),
-                isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT)
+                isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT),
+                isTestCode = isTestCode,
+                isLibraryCode = isLibraryCode,
+
+                accessibilityWarning = accessibilityWarning
             )
+
             is PsiField -> DefinitionLocation(
                 name = element.name ?: "anonymous",
                 filePath = relativePath,
@@ -192,8 +270,13 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
                 type = "field",
                 signature = "${element.type.presentableText} ${element.name}",
                 containingClass = element.containingClass?.qualifiedName,
-                modifiers = extractModifiers(element.modifierList)
+                modifiers = extractModifiers(element.modifierList),
+                isTestCode = isTestCode,
+                isLibraryCode = isLibraryCode,
+
+                accessibilityWarning = accessibilityWarning
             )
+
             is PsiVariable -> DefinitionLocation(
                 name = element.name ?: "anonymous",
                 filePath = relativePath,
@@ -203,8 +286,13 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
                 type = "variable",
                 signature = "${element.type.presentableText} ${element.name}",
                 containingClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.qualifiedName,
-                modifiers = extractModifiers(element.modifierList)
+                modifiers = extractModifiers(element.modifierList),
+                isTestCode = isTestCode,
+                isLibraryCode = isLibraryCode,
+
+                accessibilityWarning = accessibilityWarning
             )
+
             else -> DefinitionLocation(
                 name = (element as? PsiNamedElement)?.name ?: "unknown",
                 filePath = relativePath,
@@ -212,7 +300,9 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
                 endOffset = textRange.endOffset,
                 lineNumber = lineNumber + 1,
                 type = "unknown",
-                signature = element.text?.lines()?.firstOrNull()?.trim()
+                signature = element.text?.lines()?.firstOrNull()?.trim(),
+                isTestCode = isTestCode,
+                isLibraryCode = isLibraryCode
             )
         }
     }
@@ -229,8 +319,8 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
     }
 
     private fun buildMethodSignature(method: PsiMethod): String {
-        val params = method.parameterList.parameters.joinToString(", ") { 
-            "${it.type.presentableText} ${it.name}" 
+        val params = method.parameterList.parameters.joinToString(", ") {
+            "${it.type.presentableText} ${it.name}"
         }
         val returnType = if (method.isConstructor) "" else "${method.returnType?.presentableText ?: "void"} "
         val modifiers = method.modifierList.text
@@ -251,5 +341,107 @@ class FindSymbolDefinitionTool : AbstractMcpTool<FindDefinitionArgs>(FindDefinit
             PsiModifier.VOLATILE,
             PsiModifier.TRANSIENT
         ).filter { modifierList.hasModifierProperty(it) }
+    }
+
+    private fun isInTestCode(virtualFile: VirtualFile): Boolean {
+        val path = virtualFile.path
+        return path.contains("/test/") || path.contains("/tests/") ||
+                path.contains("Test.java") || path.contains("Tests.java") ||
+                path.contains("Spec.java") || path.contains("Test.kt") ||
+                path.contains("Tests.kt") || path.contains("Spec.kt")
+    }
+
+    private fun isInLibraryCode(virtualFile: VirtualFile, project: Project): Boolean {
+        val fileIndex = ProjectRootManager.getInstance(project).fileIndex
+        return fileIndex.isInLibrary(virtualFile)
+    }
+
+    private fun calculateConfidence(element: PsiElement, searchTerm: String, isClass: Boolean): Float {
+        val elementName = (element as? PsiNamedElement)?.name ?: return 0.5f
+        val virtualFile = element.containingFile.virtualFile
+        val project = element.project
+
+        return when {
+            // Exact name match in project code
+            elementName == searchTerm && !isInLibraryCode(virtualFile, project) -> {
+                when {
+                    isClass && element is PsiClass -> 1.0f
+                    !isClass && element is PsiMember -> 0.95f
+                    else -> 0.9f
+                }
+            }
+            // Exact name match in library code
+            elementName == searchTerm && isInLibraryCode(virtualFile, project) -> 0.5f
+            // Case-insensitive match
+            elementName.equals(searchTerm, ignoreCase = true) -> 0.7f
+            // Partial match
+            elementName.contains(searchTerm, ignoreCase = true) -> 0.3f
+            else -> 0.1f
+        }
+    }
+
+    private fun generateDisambiguationHint(element: PsiElement): String? {
+        return when (element) {
+            is PsiMethod -> {
+                val containingClass = element.containingClass?.name ?: "Unknown"
+                when {
+                    element.isConstructor -> "Constructor in $containingClass"
+                    element.hasModifierProperty(PsiModifier.STATIC) -> "Static method in $containingClass"
+                    element.hasModifierProperty(PsiModifier.ABSTRACT) -> "Abstract method in $containingClass"
+                    else -> "Method in $containingClass"
+                }
+            }
+
+            is PsiField -> {
+                val containingClass = element.containingClass?.qualifiedName ?: "Unknown"
+                when {
+                    element.hasModifierProperty(PsiModifier.STATIC) &&
+                            element.hasModifierProperty(PsiModifier.FINAL) -> "Constant in $containingClass"
+
+                    element.hasModifierProperty(PsiModifier.STATIC) -> "Static field in $containingClass"
+                    else -> "Field in $containingClass"
+                }
+            }
+
+            is PsiClass -> {
+                val packageName = (element.containingFile as? PsiJavaFile)?.packageName
+                when {
+                    element.isInterface -> "Interface in ${packageName ?: "default package"}"
+                    element.isEnum -> "Enum in ${packageName ?: "default package"}"
+                    element.isAnnotationType -> "Annotation in ${packageName ?: "default package"}"
+                    element.hasModifierProperty(PsiModifier.ABSTRACT) -> "Abstract class in ${packageName ?: "default package"}"
+                    else -> "Class in ${packageName ?: "default package"}"
+                }
+            }
+
+            is PsiVariable -> {
+                when (element) {
+                    is PsiParameter -> "Parameter"
+                    is PsiLocalVariable -> "Local variable"
+                    else -> "Variable"
+                }
+            }
+
+            else -> null
+        }
+    }
+
+    private fun generateAccessibilityWarning(element: PsiElement): String? {
+        if (element !is PsiModifierListOwner) return null
+
+        return when {
+            element.hasModifierProperty(PsiModifier.PRIVATE) ->
+                "Private member - not accessible from outside the declaring class"
+
+            element.hasModifierProperty(PsiModifier.PROTECTED) ->
+                "Protected member - only accessible from subclasses or same package"
+
+            !element.hasModifierProperty(PsiModifier.PUBLIC) &&
+                    !element.hasModifierProperty(PsiModifier.PROTECTED) &&
+                    !element.hasModifierProperty(PsiModifier.PRIVATE) ->
+                "Package-private member - only accessible from the same package"
+
+            else -> null
+        }
     }
 }

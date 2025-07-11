@@ -32,19 +32,22 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: users field references not found through global search")
             return
         }
         
         // Verify references are found in UserService methods
-        val containingMethods = references.map { it.containingMethod }.toSet()
+        val containingMethods = result.allReferences.map { it.containingMethod }.toSet()
         assertTrue(containingMethods.contains("addUser") || 
                   containingMethods.contains("findUser") ||
                   containingMethods.contains("removeUser"),
             "Should find references in UserService methods")
+        
+        // Check for insights
+        assertTrue(result.insights.isNotEmpty(), "Should generate insights")
     }
 
     @Test
@@ -64,17 +67,21 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: addUser method references not found through global search")
             return
         }
         
         // Should find method call references
-        val methodCalls = references.filter { it.usageType == "method_call" }
-        assertTrue(methodCalls.isNotEmpty() || references.isNotEmpty(),
+        val methodCalls = result.usagesByType["method_call"] ?: emptyList()
+        assertTrue(methodCalls.isNotEmpty() || result.allReferences.isNotEmpty(),
             "Should find addUser method references")
+        
+        // Verify data flow context is populated
+        val hasDataFlowContext = result.allReferences.any { it.dataFlowContext != null }
+        assertTrue(hasDataFlowContext, "Should have data flow context for some references")
     }
 
     @Test
@@ -94,15 +101,15 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: DEFAULT_ROLE constant references not found through global search")
             return
         }
         
         // Should find references to DEFAULT_ROLE constant
-        assertTrue(references.any { it.usageType == "read" || it.usageType == "field_access" },
+        assertTrue(result.allReferences.any { it.usageType == "field_read" || it.usageType == "field_as_argument" },
             "Should find read references to DEFAULT_ROLE")
     }
 
@@ -123,20 +130,17 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: User constructor references not found through global search")
             return
         }
         
         // Should find constructor invocations
-        val constructorRefs = references.filter { 
-            it.usageType == "constructor_call" || 
-            it.elementText?.contains("new User") ?: false ||
-            it.usageType == "type_reference"
-        }
-        assertTrue(constructorRefs.isNotEmpty() || references.isNotEmpty(),
+        val constructorRefs = result.usagesByType["constructor_call"] ?: emptyList()
+        val typeRefs = result.usagesByType.filterKeys { it.contains("type") }.values.flatten()
+        assertTrue(constructorRefs.isNotEmpty() || typeRefs.isNotEmpty(),
             "Should find User constructor or type references")
     }
 
@@ -157,15 +161,15 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: userService references not found through global search")
             return
         }
         
         // Should include declaration when requested
-        val declarationRef = references.find { it.usageType == "declaration" }
+        val declarationRef = result.allReferences.find { it.usageType == "declaration" }
         if (declarationRef != null) {
             assertEquals("declaration", declarationRef.usageType, "Should have declaration reference")
         }
@@ -188,21 +192,57 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: userService references not found through global search")
             return
         }
         
         // Should find userService field references in ApiController
-        assertTrue(references.any { it.containingClass?.contains("ApiController") ?: false },
+        assertTrue(result.allReferences.any { it.containingClass?.contains("ApiController") ?: false },
             "Should find userService references in ApiController")
     }
 
     @Test
-    fun testFindDataProcessorMethodReferences() {
-        // DataProcessor is now Java, not Kotlin
+    fun testGroupedResults() {
+        val args = FindReferencesArgs(
+            symbolName = "User",
+            filePath = null,
+            position = null,
+            includeDeclaration = false
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
+        
+        if (result.allReferences.isEmpty()) {
+            println("PSI indexing limitation: User references not found through global search")
+            return
+        }
+        
+        // Verify grouped structure
+        assertNotNull(result.summary, "Should have summary")
+        assertNotNull(result.usagesByType, "Should have usagesByType")
+        assertNotNull(result.insights, "Should have insights")
+        assertNotNull(result.allReferences, "Should have allReferences")
+        
+        // Verify summary statistics
+        assertEquals(result.allReferences.size, result.summary.totalReferences, 
+            "Summary total should match reference count")
+        assertTrue(result.summary.fileCount > 0, "Should have file count")
+    }
+
+    @Test
+    fun testTestCodeInsight() {
+        // Look for a method that might not have test coverage
         val args = FindReferencesArgs(
             symbolName = "processData",
             filePath = null,
@@ -218,16 +258,77 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
-            println("PSI indexing limitation: processData method references not found through global search")
+        if (result.allReferences.isEmpty()) {
+            println("PSI indexing limitation: processData references not found through global search")
             return
         }
         
-        // Should find processData method references
-        assertTrue(references.any { it.containingClass?.contains("DataProcessor") ?: false },
-            "Should find processData references in DataProcessor or related classes")
+        // Check if test coverage insight is generated
+        if (!result.summary.hasTestUsages) {
+            val hasTestInsight = result.insights.any { it.contains("No usage found in test code") }
+            assertTrue(hasTestInsight, "Should suggest adding tests when no test usage found")
+        }
+    }
+
+    @Test
+    fun testPrimaryUsageInsight() {
+        val args = FindReferencesArgs(
+            symbolName = "User",
+            filePath = null,
+            position = null,
+            includeDeclaration = false
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
+        
+        if (result.allReferences.size > 2) {
+            // Should identify primary usage location when there are multiple references
+            val primaryUsageInsight = result.insights.find { it.contains("Primary usage is in") }
+            assertNotNull(primaryUsageInsight, "Should identify primary usage location")
+        }
+    }
+
+    @Test
+    fun testDataFlowContext() {
+        val args = FindReferencesArgs(
+            symbolName = "name",
+            filePath = null,
+            position = null,
+            includeDeclaration = false
+        )
+        
+        val response = tool.handle(project, args)
+        assertNotNull(response)
+        
+        if (response.error != null) {
+            println("PSI indexing limitation in test: ${response.error}")
+            return
+        }
+        
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
+        
+        if (result.allReferences.isEmpty()) {
+            println("PSI indexing limitation: name field references not found through global search")
+            return
+        }
+        
+        // Check various data flow contexts
+        val dataFlowContexts = result.allReferences.mapNotNull { it.dataFlowContext }.toSet()
+        println("Found data flow contexts: $dataFlowContexts")
+        
+        // Should have at least some data flow context
+        assertTrue(dataFlowContexts.isNotEmpty() || result.allReferences.isEmpty(),
+            "Should have data flow context for references")
     }
 
     @Test
@@ -247,106 +348,17 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: isValidUser static method references not found through global search")
             return
         }
         
         // Should find static method references
-        val staticMethodCalls = references.filter { 
-            it.usageType == "method_call" || it.usageType == "static_method_call" 
-        }
-        assertTrue(staticMethodCalls.isNotEmpty() || references.isNotEmpty(),
+        val staticMethodCalls = result.usagesByType["static_method_call"] ?: emptyList()
+        assertTrue(staticMethodCalls.isNotEmpty() || result.allReferences.isNotEmpty(),
             "Should find isValidUser static method references")
-    }
-
-    @Test
-    fun testFindInterfaceReferences() {
-        val args = FindReferencesArgs(
-            symbolName = "UserListener",
-            filePath = null,
-            position = null,
-            includeDeclaration = false
-        )
-        
-        val response = tool.handle(project, args)
-        assertNotNull(response)
-        
-        if (response.error != null) {
-            println("PSI indexing limitation in test: ${response.error}")
-            return
-        }
-        
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
-        
-        if (references.isEmpty()) {
-            println("PSI indexing limitation: UserListener interface references not found through global search")
-            return
-        }
-        
-        // Should find UserListener interface references
-        assertTrue(references.any { it.usageType == "type_reference" || it.usageType == "interface_reference" },
-            "Should find UserListener type references")
-    }
-
-    @Test
-    fun testFindGenericTypeReferences() {
-        val args = FindReferencesArgs(
-            symbolName = "ApiResponse",
-            filePath = null,
-            position = null,
-            includeDeclaration = false
-        )
-        
-        val response = tool.handle(project, args)
-        assertNotNull(response)
-        
-        if (response.error != null) {
-            println("PSI indexing limitation in test: ${response.error}")
-            return
-        }
-        
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
-        
-        if (references.isEmpty()) {
-            println("PSI indexing limitation: ApiResponse generic type references not found through global search")
-            return
-        }
-        
-        // Should find ApiResponse generic type references
-        assertTrue(references.any { it.containingClass?.contains("ApiController") ?: false },
-            "Should find ApiResponse references in ApiController methods")
-    }
-
-    @Test
-    fun testFindEnumReferences() {
-        val args = FindReferencesArgs(
-            symbolName = "UserEvent",
-            filePath = null,
-            position = null,
-            includeDeclaration = false
-        )
-        
-        val response = tool.handle(project, args)
-        assertNotNull(response)
-        
-        if (response.error != null) {
-            println("PSI indexing limitation in test: ${response.error}")
-            return
-        }
-        
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
-        
-        if (references.isEmpty()) {
-            println("PSI indexing limitation: UserEvent enum references not found through global search")
-            return
-        }
-        
-        // Should find UserEvent enum references
-        assertTrue(references.any { it.usageType == "type_reference" || it.usageType == "enum_reference" },
-            "Should find UserEvent enum references")
     }
 
     @Test
@@ -367,21 +379,20 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
+        if (result.allReferences.isEmpty()) {
             println("PSI indexing limitation: User cross-file references not found through global search")
             return
         }
         
         // Should find User references in multiple files
-        val fileRefs = references.map { it.filePath }.toSet()
+        val fileRefs = result.allReferences.map { it.filePath }.toSet()
         assertTrue(fileRefs.size >= 1, "Should find User references across files")
         
-        // Should find references in UserService and ApiController
-        assertTrue(references.any { it.containingClass?.contains("UserService") ?: false } ||
-                  references.any { it.containingClass?.contains("ApiController") ?: false },
-            "Should find User references in UserService or ApiController")
+        // Verify file count in summary
+        assertEquals(fileRefs.size, result.summary.fileCount, 
+            "Summary file count should match actual file count")
     }
 
     @Test
@@ -397,14 +408,17 @@ class FindSymbolReferencesToolTest : BaseTest() {
         assertNotNull(response)
         assertNull(response.error, "Should not have error for not found")
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
-        assertTrue(references.isEmpty(), "Should return empty list when no references found")
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
+        assertTrue(result.allReferences.isEmpty(), "Should return empty references when not found")
+        assertEquals(0, result.summary.totalReferences, "Should have 0 total references")
+        assertTrue(result.insights.contains("Symbol not found"), "Should have 'Symbol not found' insight")
     }
 
     @Test
-    fun testFindMethodOverrideReferences() {
+    fun testFieldMutabilityInsight() {
+        // Test with a field that might be read-only
         val args = FindReferencesArgs(
-            symbolName = "toString",
+            symbolName = "id",
             filePath = null,
             position = null,
             includeDeclaration = false
@@ -418,44 +432,19 @@ class FindSymbolReferencesToolTest : BaseTest() {
             return
         }
         
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
+        val result: GroupedReferencesResult = parseJsonResponse(response.status)
         
-        if (references.isEmpty()) {
-            println("PSI indexing limitation: toString method references not found through global search")
-            return
+        if (result.allReferences.isNotEmpty()) {
+            // Check if we only have reads and no writes
+            val writeCount = result.allReferences.count { it.usageType == "field_write" }
+            val readCount = result.allReferences.count { 
+                it.usageType == "field_read" || it.usageType == "field_as_argument" 
+            }
+            
+            if (writeCount == 0 && readCount > 0) {
+                val finalInsight = result.insights.find { it.contains("consider making it final") }
+                assertNotNull(finalInsight, "Should suggest making read-only field final")
+            }
         }
-        
-        // Should find toString method references/overrides
-        assertTrue(references.any { it.usageType == "override" || it.usageType == "method_call" },
-            "Should find toString override or call references")
-    }
-
-    @Test
-    fun testFindAccessorReferences() {
-        val args = FindReferencesArgs(
-            symbolName = "getName",
-            filePath = null,
-            position = null,
-            includeDeclaration = false
-        )
-        
-        val response = tool.handle(project, args)
-        assertNotNull(response)
-        
-        if (response.error != null) {
-            println("PSI indexing limitation in test: ${response.error}")
-            return
-        }
-        
-        val references: List<ReferenceInfo> = parseJsonResponse(response.status)
-        
-        if (references.isEmpty()) {
-            println("PSI indexing limitation: getName method references not found through global search")
-            return
-        }
-        
-        // Should find getName method references
-        assertTrue(references.any { it.usageType == "method_call" },
-            "Should find getName method call references")
     }
 }

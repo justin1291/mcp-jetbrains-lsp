@@ -1,4 +1,5 @@
 .claude
+.kotlin
 .gradle
 build/
 .intellijPlatform/
