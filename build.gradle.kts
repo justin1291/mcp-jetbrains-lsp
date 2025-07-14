@@ -26,7 +26,7 @@ dependencies {
         
         // Language support
         bundledPlugin("com.intellij.java")
-        plugin("PythonCore:251.26927.53")
+        plugin("PythonCore:251.23774.460")
     }
 
 
