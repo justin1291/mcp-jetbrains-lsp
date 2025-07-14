@@ -2,7 +2,7 @@ plugins {
     id("java")
     kotlin("jvm") version "2.1.0"
     id("org.jetbrains.intellij.platform") version "2.6.0"
-    kotlin("plugin.serialization") version "2.1.0"
+    kotlin("plugin.serialization") version "2.2.0"
     kotlin("plugin.power-assert") version "2.1.0"
 }
 
