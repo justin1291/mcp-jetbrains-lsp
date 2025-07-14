@@ -68,9 +68,11 @@ abstract class BaseLanguageHandler {
      * Get line number from offset in a PSI file.
      */
     protected fun getLineNumber(element: PsiElement): Int {
-        val document = PsiDocumentManager.getInstance(element.project)
-            .getDocument(element.containingFile)
-        return document?.getLineNumber(element.textRange.startOffset) ?: 0
+        return com.intellij.openapi.application.ReadAction.compute<Int, Exception> {
+            val document = PsiDocumentManager.getInstance(element.project)
+                .getDocument(element.containingFile)
+            document?.getLineNumber(element.textRange?.startOffset ?: 0) ?: 0
+        }
     }
     
     /**

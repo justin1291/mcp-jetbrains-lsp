@@ -3,10 +3,11 @@ plugins {
     kotlin("jvm") version "2.1.0"
     id("org.jetbrains.intellij.platform") version "2.6.0"
     kotlin("plugin.serialization") version "2.1.0"
+    kotlin("plugin.power-assert") version "2.1.0"
 }
 
 group = "dev.mcp.extensions"
-version = "1.0.2"
+version = "1.0.3"
 
 repositories {
     mavenCentral()
@@ -15,72 +16,65 @@ repositories {
     }
 }
 
-// Configure IntelliJ Platform Gradle Plugin
-// Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     intellijPlatform {
-        create("IC", "2024.3")
+        intellijIdeaCommunity("2025.1")
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.JUnit5)
         plugin("com.intellij.mcpServer", "1.0.30")
+        
+        // Language support
         bundledPlugin("com.intellij.java")
+        plugin("PythonCore:251.23774.460")
+        testPlugin("PythonCore:251.23774.460")
     }
 
-    // IMPORTANT: Use compileOnly for kotlinx-serialization to avoid class loader conflicts
-    // The MCP Server plugin already provides this dependency at runtime
-    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    
-    // For tests, we need the actual implementation
-    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
-    // Test dependencies
+    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     testImplementation(kotlin("test"))
-    // NOTE: JUnit4 is required due to IntelliJ Platform's JUnit5TestSessionListener implementation
-    // This is a known issue where IntelliJ's JUnit5 support depends on junit.framework.TestCase
     testImplementation("junit:junit:4.13.2")
 }
 
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "243"
+            sinceBuild = "251"
+            untilBuild = "251.*"  // Exclude 2025.2 EAP (252.*) and later
         }
 
         changeNotes = """
-            Initial release of MCP Language Service Extension:
-            - Extract symbols from files
-            - Find symbol definitions
-            - Find symbol references
-            - Get hover information
+            v1.0.3:
+            - Improve plugin compatibility
+            
+            v1.0.0:
+            - Initial release
+            - Java/Kotlin support
+            - Alpha Python support 
         """.trimIndent()
     }
 
     pluginVerification {
         ides {
-            ide("IC-2024.3")
             ide("IC-2025.1")
         }
     }
 }
 
 tasks {
-    // Set the JVM compatibility versions
     withType<JavaCompile> {
         sourceCompatibility = "21"
         targetCompatibility = "21"
     }
 
     test {
-        // Use JUnit Platform (JUnit 5)
+
         useJUnitPlatform()
-
-        // Increase memory for tests
         jvmArgs("-Xmx2048m")
-
-        // Show test output
         testLogging {
             events("passed", "skipped", "failed")
             showStandardStreams = true
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         }
     }
 }
@@ -89,4 +83,16 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
+}
+
+// Configure Power Assert
+powerAssert {
+    functions = listOf(
+        "kotlin.assert",
+        "kotlin.test.assertTrue", 
+        "kotlin.test.assertFalse",
+        "kotlin.test.assertEquals",
+        "kotlin.test.assertNotNull",
+        "kotlin.test.assertNull"
+    )
 }

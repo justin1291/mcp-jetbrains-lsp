@@ -5,20 +5,21 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import dev.mcp.extensions.lsp.core.interfaces.DefinitionFinder
-import dev.mcp.extensions.lsp.languages.java.JavaDefinitionFinder
+import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
 
 /**
  * Factory for creating language-specific definition finders.
+ * Uses IntelliJ's service mechanism to load only available implementations.
  */
 object DefinitionFinderFactory {
     private val logger = Logger.getInstance(DefinitionFinderFactory::class.java)
-    
-    // Cache finders to avoid creating new instances repeatedly
-    private val finderCache = mutableMapOf<String, DefinitionFinder>()
-    
+
+    private const val JAVA_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.java.JavaDefinitionFinder"
+    private const val PYTHON_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"
+
     /**
      * Get the appropriate definition finder for a given file.
-     * 
+     *
      * @param psiFile The PSI file to get a finder for
      * @return DefinitionFinder implementation for the file's language
      * @throws UnsupportedOperationException if the language is not supported
@@ -27,10 +28,10 @@ object DefinitionFinderFactory {
         val language = psiFile.language
         return getFinderForLanguage(language)
     }
-    
+
     /**
      * Get the appropriate definition finder for a given element.
-     * 
+     *
      * @param element The PSI element to get a finder for
      * @return DefinitionFinder implementation for the element's language
      * @throws UnsupportedOperationException if the language is not supported
@@ -39,34 +40,71 @@ object DefinitionFinderFactory {
         val language = element.language
         return getFinderForLanguage(language)
     }
-    
+
     private fun getFinderForLanguage(language: Language): DefinitionFinder {
         val languageId = language.id
         val languageName = language.displayName
-        
+
         logger.info("Determining definition finder for language: $languageId ($languageName)")
-        
-        return when {
-            SymbolExtractorFactory.isLanguageSupported(language) -> {
-                when {
-                    isJavaOrKotlin(language) -> {
-                        logger.debug("Using Java/Kotlin definition finder")
-                        finderCache.getOrPut("java") { JavaDefinitionFinder() }
-                    }
-                    else -> {
-                        throw UnsupportedOperationException("Finder not implemented for: $languageName")
-                    }
+
+        // Try to get language-specific service
+        val finder = when {
+            isJavaOrKotlin(language) -> {
+                logger.debug("Looking for Java/Kotlin definition finder service")
+                try {
+                    DynamicServiceLoader.loadDefinitionFinder(JAVA_DEFINITION_FINDER)
+                } catch (e: Exception) {
+                    logger.debug("Java definition finder service not available: ${e.message}")
+                    null
                 }
             }
+
+            isPython(language) -> {
+                logger.debug("Looking for Python definition finder service")
+                try {
+                    DynamicServiceLoader.loadDefinitionFinder(PYTHON_DEFINITION_FINDER)
+                } catch (e: Exception) {
+                    logger.debug("Python definition finder service not available: ${e.message}")
+                    null
+                }
+            }
+
+            else -> null
+        }
+
+        if (finder != null) {
+            logger.info("Found definition finder for $languageName")
+            return finder
+        }
+
+        // Provide helpful error message based on language
+        val errorMessage = when {
+            isPython(language) -> {
+                "Python support is not available in this IDE. " +
+                        "Python is supported in PyCharm or IntelliJ IDEA Ultimate with the Python plugin installed."
+            }
+
+            isJavaOrKotlin(language) -> {
+                "Java/Kotlin support should be available but the service failed to load. " +
+                        "Please restart the IDE or reinstall the plugin."
+            }
+
             else -> {
-                logger.warn("Unsupported language: $languageId")
-                throw UnsupportedOperationException("Language not supported: $languageName (id: $languageId)")
+                "Language not supported: $languageName (id: $languageId)"
             }
         }
+
+        logger.warn("No definition finder available: $errorMessage")
+        throw UnsupportedOperationException(errorMessage)
     }
-    
+
     private fun isJavaOrKotlin(language: Language): Boolean {
         val id = language.id
         return id == "JAVA" || id == "kotlin" || id == "Kotlin"
+    }
+
+    private fun isPython(language: Language): Boolean {
+        val id = language.id
+        return id == "Python" || id == "PythonCore"
     }
 }

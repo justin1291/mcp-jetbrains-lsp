@@ -71,21 +71,16 @@ object PsiUtils {
         val scope = GlobalSearchScope.projectScope(project)
         
         val allFileNames = FilenameIndex.getAllFilenames(project)
-        val processedExtensions = mutableSetOf<String>()
         
         for (fileName in allFileNames) {
-            val extension = fileName.substringAfterLast('.', "")
-            
-            if (extension in processedExtensions) continue
-            
             val virtualFiles = FilenameIndex.getVirtualFilesByName(fileName, scope)
-            val virtualFile = virtualFiles.firstOrNull() ?: continue
             
-            val psiFile = psiManager.findFile(virtualFile) ?: continue
-            
-            if (isProjectFile(project, virtualFile)) {
-                result.add(psiFile)
-                processedExtensions.add(extension)
+            for (virtualFile in virtualFiles) {
+                val psiFile = psiManager.findFile(virtualFile) ?: continue
+                
+                if (isProjectFile(project, virtualFile)) {
+                    result.add(psiFile)
+                }
             }
         }
         

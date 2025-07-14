@@ -8,7 +8,7 @@
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
-            <option value="$PROJECT_DIR$/demo-project" />
+            <option value="$PROJECT_DIR$/java-demo-project" />
           </set>
         </option>
       </GradleProjectSettings>

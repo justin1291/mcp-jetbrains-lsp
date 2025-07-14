@@ -1,19 +1,27 @@
 package dev.mcp.extensions.lsp.languages.java
 
+import com.intellij.openapi.components.Service
 import com.intellij.psi.*
+import com.intellij.psi.javadoc.PsiDocComment
 import dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor
 import dev.mcp.extensions.lsp.core.models.GetSymbolsArgs
 import dev.mcp.extensions.lsp.core.models.SymbolInfo
+import dev.mcp.extensions.lsp.core.models.TypeInfo
+import dev.mcp.extensions.lsp.core.models.Visibility
+import dev.mcp.extensions.lsp.core.utils.symbol
 import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 
 /**
  * Symbol extractor implementation for Java and Kotlin languages.
+ *
+ * Registered as a service in mcp-lsp-java.xml when Java module is available.
  */
+@Service
 class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
-    
+
     override fun extractSymbolsFlat(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
         logger.info("Extracting symbols (flat) from Java/Kotlin file: ${psiFile.name}")
-        
+
         val symbols = mutableListOf<SymbolInfo>()
 
         // Visit all PSI elements and extract symbols
@@ -21,20 +29,41 @@ class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
             override fun visitElement(element: PsiElement) {
                 when (element) {
                     is PsiClass -> {
-                        if (shouldIncludeSymbol("class", args.symbolTypes)) {
-                            symbols.add(extractClassInfo(element, includeChildren = false))
+                        if (shouldIncludeSymbol(getClassKind(element), args.symbolTypes)) {
+                            val symbol = extractClassInfo(element, includeChildren = false)
+                            if (shouldIncludeSymbol(symbol, args)) {
+                                symbols.add(symbol)
+                            }
                         }
                     }
+
                     is PsiMethod -> {
-                        if (shouldIncludeSymbol("method", args.symbolTypes)) {
-                            symbols.add(extractMethodInfo(element))
+                        val kind = if (element.isConstructor) "constructor" else "method"
+                        if (shouldIncludeSymbol(kind, args.symbolTypes)) {
+                            val symbol = extractMethodInfo(element)
+                            if (shouldIncludeSymbol(symbol, args)) {
+                                symbols.add(symbol)
+                            }
                         }
                     }
+
                     is PsiField -> {
-                        if (shouldIncludeSymbol("field", args.symbolTypes)) {
-                            symbols.add(extractFieldInfo(element))
+                        // Determine the actual kind before filtering
+                        val actualKind = when {
+                            element is PsiEnumConstant -> "enum_member"
+                            element.hasModifierProperty(PsiModifier.FINAL) &&
+                                    element.hasModifierProperty(PsiModifier.STATIC) -> "constant"
+
+                            else -> "field"
+                        }
+                        if (shouldIncludeSymbol(actualKind, args.symbolTypes)) {
+                            val symbol = extractFieldInfo(element)
+                            if (shouldIncludeSymbol(symbol, args)) {
+                                symbols.add(symbol)
+                            }
                         }
                     }
+
                     is PsiImportStatement -> {
                         if (args.includeImports && shouldIncludeSymbol("import", args.symbolTypes)) {
                             symbols.add(extractImportInfo(element))
@@ -48,10 +77,10 @@ class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
         logger.debug("Extracted ${symbols.size} flat symbols")
         return symbols
     }
-    
+
     override fun extractSymbolsHierarchical(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
         logger.info("Extracting symbols (hierarchical) from Java/Kotlin file: ${psiFile.name}")
-        
+
         val symbols = mutableListOf<SymbolInfo>()
 
         // Process imports first if requested
@@ -63,159 +92,442 @@ class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
             }
         }
 
-        // Process top-level elements
-        psiFile.children.forEach { element ->
-            when (element) {
-                is PsiClass -> {
-                    if (shouldIncludeSymbol("class", args.symbolTypes)) {
-                        symbols.add(extractClassInfo(element, includeChildren = true, args = args))
+        // Process top-level classes directly from file children
+        // In Java files, classes can be direct children or wrapped in other PSI elements
+        val classes = mutableListOf<PsiClass>()
+        psiFile.accept(object : PsiRecursiveElementVisitor() {
+            override fun visitElement(element: PsiElement) {
+                if (element is PsiClass) {
+                    // Check if this is a top-level class (not inner/nested)
+                    var parent = element.parent
+                    var isTopLevel = false
+
+                    // Walk up the parent chain to see if we reach the PsiFile
+                    while (parent != null && parent !is PsiClass) {
+                        if (parent is PsiFile) {
+                            isTopLevel = true
+                            break
+                        }
+                        parent = parent.parent
+                    }
+
+                    if (isTopLevel && !classes.contains(element)) {
+                        classes.add(element)
+                        logger.debug("Found top-level class: ${element.name}")
                     }
                 }
-                // Handle other top-level elements if needed
+                super.visitElement(element)
+            }
+        })
+
+        // Process each top-level class
+        classes.forEach { psiClass ->
+            val kind = getClassKind(psiClass)
+            println("DEBUG hierarchical: Processing class ${psiClass.name} (${kind})")
+            if (shouldIncludeSymbol(kind, args.symbolTypes)) {
+                println("DEBUG hierarchical: Symbol type matches, extracting...")
+                val symbol = extractClassInfo(psiClass, includeChildren = true, args = args)
+                if (shouldIncludeSymbol(symbol, args)) {
+                    println("DEBUG hierarchical: Adding ${symbol.name} with ${symbol.children?.size ?: 0} children")
+                    symbols.add(symbol)
+                } else {
+                    println("DEBUG hierarchical: Symbol filtered out by shouldIncludeSymbol")
+                }
+            } else {
+                println("DEBUG hierarchical: Filtered out by symbol type")
             }
         }
 
-        logger.debug("Extracted ${symbols.size} hierarchical symbols")
+        logger.debug("Extracted ${symbols.size} hierarchical symbols total")
         return symbols
     }
-    
+
     override fun supportsFile(psiFile: PsiFile): Boolean {
         val languageId = psiFile.language.id
         return languageId == "JAVA" || languageId == "kotlin" || languageId == "Kotlin"
     }
-    
+
     override fun getSupportedLanguage(): String {
         return "Java/Kotlin"
     }
-    
+
     private fun extractClassInfo(
-        psiClass: PsiClass, 
-        includeChildren: Boolean = false, 
+        psiClass: PsiClass,
+        includeChildren: Boolean = false,
         args: GetSymbolsArgs? = null
     ): SymbolInfo {
-        val textRange = psiClass.textRange
-        val document = PsiDocumentManager.getInstance(psiClass.project).getDocument(psiClass.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-        
-        val annotations = getAnnotations(psiClass)
+        return symbol {
+            name(psiClass.name ?: "anonymous")
+            qualifiedName(psiClass.qualifiedName)
+            kind(getClassKind(psiClass))
 
-        val children = if (includeChildren && args != null) {
-            val childSymbols = mutableListOf<SymbolInfo>()
-            
-            // Add inner classes
-            psiClass.innerClasses.forEach { innerClass ->
-                if (shouldIncludeSymbol("class", args.symbolTypes)) {
-                    childSymbols.add(extractClassInfo(innerClass, includeChildren = true, args = args))
-                }
-            }
-            
-            // Add methods
-            psiClass.methods.forEach { method ->
-                if (shouldIncludeSymbol("method", args.symbolTypes)) {
-                    childSymbols.add(extractMethodInfo(method))
-                }
-            }
-            
-            // Add fields
-            psiClass.fields.forEach { field ->
-                if (shouldIncludeSymbol("field", args.symbolTypes)) {
-                    childSymbols.add(extractFieldInfo(field))
-                }
-            }
-            
-            childSymbols
-        } else null
+            location(
+                psiClass.textRange.startOffset,
+                psiClass.textRange.endOffset,
+                getLineNumber(psiClass) + 1
+            )
 
-        return SymbolInfo(
-            name = psiClass.name ?: "anonymous",
-            type = psiClass.qualifiedName ?: psiClass.name ?: "unknown",
-            kind = when {
-                psiClass.isInterface -> "interface"
-                psiClass.isEnum -> "enum"
-                psiClass.isAnnotationType -> "annotation"
-                else -> "class"
-            },
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1, // Convert to 1-based
-            modifiers = extractModifiers(psiClass.modifierList),
-            children = children,
-            isDeprecated = hasAnnotation(psiClass, "java.lang.Deprecated"),
-            hasJavadoc = psiClass.docComment != null,
-            visibility = getVisibility(psiClass.modifierList),
-            annotations = annotations
-        )
+            // Add modifiers
+            psiClass.modifierList?.let { modifiers ->
+                extractModifiers(modifiers).forEach { modifier(it) }
+            }
+
+            // Visibility
+            visibility(getVisibility(psiClass.modifierList))
+
+            // Documentation
+            psiClass.docComment?.let {
+                documentation(
+                    present = true,
+                    summary = extractDocSummary(it),
+                    format = "javadoc"
+                )
+            }
+
+            // Annotations as decorators
+            getAnnotations(psiClass).forEach { annotation ->
+                decorator(
+                    annotation.removePrefix("@"),
+                    builtin = isBuiltinAnnotation(annotation)
+                )
+            }
+
+            // Type parameters
+            if (psiClass.hasTypeParameters()) {
+                val typeParams = psiClass.typeParameters.joinToString(", ") { it.name ?: "?" }
+                languageData("typeParameters", typeParams)
+            }
+
+            // Extends/implements
+            psiClass.extendsList?.referencedTypes?.forEach { superType ->
+                languageData("extends", superType.presentableText)
+            }
+
+            psiClass.implementsList?.referencedTypes?.forEach { interfaceType ->
+                implements(interfaceType.presentableText)
+            }
+
+            // Add children if requested
+            if (includeChildren && args != null) {
+                val childSymbols = mutableListOf<SymbolInfo>()
+
+                // Add inner classes
+                println("DEBUG extractClassInfo: Building children for ${psiClass.name}, inner classes: ${psiClass.innerClasses.size}")
+                psiClass.innerClasses.forEach { innerClass ->
+                    val innerKind = getClassKind(innerClass)
+                    if (shouldIncludeSymbol(innerKind, args.symbolTypes)) {
+                        val innerSymbol = extractClassInfo(innerClass, includeChildren = true, args = args)
+                        if (shouldIncludeSymbol(innerSymbol, args)) {
+                            childSymbols.add(innerSymbol)
+                        }
+                    }
+                }
+
+                // Add methods
+                println("DEBUG extractClassInfo: Methods: ${psiClass.methods.size}")
+                psiClass.methods.forEach { method ->
+                    val methodKind = if (method.isConstructor) "constructor" else "method"
+                    if (shouldIncludeSymbol(methodKind, args.symbolTypes)) {
+                        val methodSymbol = extractMethodInfo(method)
+                        if (shouldIncludeSymbol(methodSymbol, args)) {
+                            childSymbols.add(methodSymbol)
+                        }
+                    }
+                }
+
+                // Add fields
+                println("DEBUG extractClassInfo: Fields: ${psiClass.fields.size}")
+                psiClass.fields.forEach { field ->
+                    // Determine the actual kind before filtering
+                    val actualKind = when {
+                        field is PsiEnumConstant -> "enum_member"
+                        field.hasModifierProperty(PsiModifier.FINAL) &&
+                                field.hasModifierProperty(PsiModifier.STATIC) -> "constant"
+
+                        else -> "field"
+                    }
+                    if (shouldIncludeSymbol(actualKind, args.symbolTypes)) {
+                        val fieldSymbol = extractFieldInfo(field)
+                        if (shouldIncludeSymbol(fieldSymbol, args)) {
+                            childSymbols.add(fieldSymbol)
+                        }
+                    }
+                }
+
+                println("DEBUG extractClassInfo: Total children for ${psiClass.name}: ${childSymbols.size}")
+                children(childSymbols)
+            } else {
+                println("DEBUG extractClassInfo: Not including children for ${psiClass.name}: includeChildren=$includeChildren, args=${args != null}")
+            }
+
+            // Mark as deprecated if needed
+            if (hasAnnotation(psiClass, "java.lang.Deprecated")) {
+                deprecated()
+            }
+        }
     }
 
     private fun extractMethodInfo(psiMethod: PsiMethod): SymbolInfo {
-        val textRange = psiMethod.textRange
-        val document = PsiDocumentManager.getInstance(psiMethod.project).getDocument(psiMethod.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-        
-        val superMethods = psiMethod.findSuperMethods()
-        val annotations = getAnnotations(psiMethod)
+        return symbol {
+            name(psiMethod.name)
+            qualifiedName("${psiMethod.containingClass?.qualifiedName ?: "unknown"}.${psiMethod.name}")
+            kind(if (psiMethod.isConstructor) "constructor" else "method")
 
-        return SymbolInfo(
-            name = psiMethod.name,
-            type = "${psiMethod.containingClass?.qualifiedName ?: "unknown"}.${psiMethod.name}",
-            kind = if (psiMethod.isConstructor) "constructor" else "method",
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1,
-            modifiers = extractModifiers(psiMethod.modifierList),
-            parameters = psiMethod.parameterList.parameters.map { param ->
+            location(
+                psiMethod?.textRange?.startOffset ?: 0,
+                psiMethod?.textRange?.endOffset ?: 0,
+                getLineNumber(psiMethod) + 1
+            )
+
+            // Modifiers
+            extractModifiers(psiMethod.modifierList).forEach { modifier(it) }
+
+            // Type info for return type
+            psiMethod.returnType?.let { returnType ->
+                type(
+                    TypeInfo(
+                        displayName = returnType.presentableText,
+                        baseType = extractBaseType(returnType),
+                        typeParameters = extractTypeParameters(returnType),
+                        isArray = returnType is PsiArrayType,
+                        rawType = returnType.canonicalText
+                    )
+                )
+            }
+
+            // Signature
+            signature(buildMethodSignature(psiMethod))
+
+            // Visibility
+            visibility(getVisibility(psiMethod.modifierList))
+
+            // Documentation
+            psiMethod.docComment?.let {
+                documentation(
+                    present = true,
+                    summary = extractDocSummary(it),
+                    format = "javadoc"
+                )
+            }
+
+            val explictOverride = hasAnnotation(psiMethod, "Override")
+            val superMethods = psiMethod.findSuperMethods()
+            if (superMethods.isNotEmpty()) {
+                val superMethod = superMethods.first()
+                superMethod.containingClass?.let { superClass ->
+                    overrides(
+                        superClass.qualifiedName ?: superClass.name ?: "Unknown",
+                        superMethod.name,
+                        explictOverride
+                    )
+                }
+            } else if (explictOverride) {
+                // workaround for hidden java.lang.Object methods
+                overrides("java.lang.Object", "toString", true)
+            }
+
+            // Annotations as decorators
+            getAnnotations(psiMethod).forEach { annotation ->
+                decorator(
+                    annotation.removePrefix("@"),
+                    builtin = isBuiltinAnnotation(annotation)
+                )
+            }
+
+            // Parameters as language data
+            val params = psiMethod.parameterList.parameters.map { param ->
                 "${param.type.presentableText} ${param.name}"
-            },
-            returnType = psiMethod.returnType?.presentableText,
-            isDeprecated = hasAnnotation(psiMethod, "java.lang.Deprecated"),
-            hasJavadoc = psiMethod.docComment != null,
-            isOverride = hasAnnotation(psiMethod, "java.lang.Override") || superMethods.isNotEmpty(),
-            overrides = superMethods.firstOrNull()?.let { 
-                "${it.containingClass?.qualifiedName}.${it.name}"
-            },
-            visibility = getVisibility(psiMethod.modifierList),
-            annotations = annotations
-        )
+            }
+            if (params.isNotEmpty()) {
+                languageData("parameters", params.joinToString(", "))
+            }
+            languageData("parameterCount", psiMethod.parameterList.parametersCount.toString())
+            languageData("hasVarArgs", psiMethod.isVarArgs.toString())
+
+            // Throws clause
+            val throwsList = psiMethod.throwsList.referencedTypes
+            if (throwsList.isNotEmpty()) {
+                languageData("throws", throwsList.joinToString(", ") { it.presentableText })
+            }
+
+            // Mark as deprecated if needed
+            if (psiMethod.isDeprecated || hasAnnotation(psiMethod, "Deprecated")) {
+                deprecated()
+            }
+        }
     }
 
     private fun extractFieldInfo(psiField: PsiField): SymbolInfo {
-        val textRange = psiField.textRange
-        val document = PsiDocumentManager.getInstance(psiField.project).getDocument(psiField.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
-        
-        val annotations = getAnnotations(psiField)
+        return symbol {
+            name(psiField.name ?: "anonymous")
+            qualifiedName("${psiField.containingClass?.qualifiedName}.${psiField.name}")
 
-        return SymbolInfo(
-            name = psiField.name ?: "anonymous",
-            type = psiField.type.presentableText,
-            kind = "field",
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1,
-            modifiers = extractModifiers(psiField.modifierList),
-            isDeprecated = hasAnnotation(psiField, "java.lang.Deprecated"),
-            hasJavadoc = psiField.docComment != null,
-            visibility = getVisibility(psiField.modifierList),
-            annotations = annotations
-        )
+            // Determine kind
+            kind(
+                when {
+                    psiField is PsiEnumConstant -> "enum_member"
+                    psiField.hasModifierProperty(PsiModifier.FINAL) &&
+                            psiField.hasModifierProperty(PsiModifier.STATIC) -> "constant" // LSP 14: static finals are constants
+                    else -> "field"
+                }
+            )
+
+            location(
+                psiField.textRange.startOffset,
+                psiField.textRange.endOffset,
+                getLineNumber(psiField) + 1
+            )
+
+            // Type info
+            type(
+                TypeInfo(
+                    displayName = psiField.type.presentableText,
+                    baseType = extractBaseType(psiField.type),
+                    typeParameters = extractTypeParameters(psiField.type),
+                    isArray = psiField.type is PsiArrayType,
+                    rawType = psiField.type.canonicalText
+                )
+            )
+
+            // Modifiers
+            psiField.modifierList?.let { modifiers ->
+                extractModifiers(modifiers).forEach { modifier(it) }
+                if (modifiers.hasModifierProperty(PsiModifier.VOLATILE)) modifier("volatile")
+                if (modifiers.hasModifierProperty(PsiModifier.TRANSIENT)) modifier("transient")
+            }
+
+            // Visibility
+            visibility(getVisibility(psiField.modifierList))
+
+            // Documentation
+            psiField.docComment?.let {
+                documentation(
+                    present = true,
+                    summary = extractDocSummary(it),
+                    format = "javadoc"
+                )
+            }
+
+            // Annotations as decorators
+            getAnnotations(psiField).forEach { annotation ->
+                decorator(
+                    annotation.removePrefix("@"),
+                    builtin = isBuiltinAnnotation(annotation)
+                )
+            }
+
+            // Initial value for constants
+            if (psiField.hasModifierProperty(PsiModifier.FINAL) && psiField.hasInitializer()) {
+                psiField.initializer?.let { initializer ->
+                    if (initializer is PsiLiteralExpression) {
+                        languageData("initialValue", initializer.text)
+                    }
+                }
+            }
+
+            // Mark as deprecated if needed
+            if (psiField.isDeprecated || hasAnnotation(psiField, "Deprecated")) {
+                deprecated()
+            }
+        }
     }
 
     private fun extractImportInfo(psiImport: PsiImportStatement): SymbolInfo {
-        val textRange = psiImport.textRange
-        val document = PsiDocumentManager.getInstance(psiImport.project).getDocument(psiImport.containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
+        return symbol {
+            name(psiImport.qualifiedName ?: "unknown")
+            kind("import")
 
-        return SymbolInfo(
-            name = psiImport.qualifiedName ?: "unknown",
-            type = if (psiImport.isOnDemand) "wildcard-import" else "import",
-            kind = "import",
-            startOffset = textRange.startOffset,
-            endOffset = textRange.endOffset,
-            lineNumber = lineNumber + 1
-        )
+            location(
+                psiImport.textRange.startOffset,
+                psiImport.textRange.endOffset,
+                getLineNumber(psiImport) + 1
+            )
+
+            if (psiImport.isOnDemand) {
+                languageData("importType", "wildcard")
+            }
+
+            visibility("public") // imports are always public
+        }
     }
 
     private fun shouldIncludeSymbol(symbolType: String, filterTypes: List<String>?): Boolean {
         return filterTypes == null || filterTypes.contains(symbolType)
+    }
+
+    private fun shouldIncludeSymbol(symbol: SymbolInfo, args: GetSymbolsArgs): Boolean {
+        // Check visibility filter
+        if (!args.includePrivate && symbol.visibility == Visibility.PRIVATE) {
+            return false
+        }
+
+        // Check generated filter
+        if (!args.includeGenerated && symbol.isSynthetic) {
+            return false
+        }
+
+        return true
+    }
+
+    private fun getClassKind(psiClass: PsiClass): String {
+        return when {
+            psiClass.isInterface -> "interface"
+            psiClass.isEnum -> "enum"
+            psiClass.isAnnotationType -> "annotation"
+            psiClass is PsiAnonymousClass -> "class" // or "anonymous_class"
+            else -> "class"
+        }
+    }
+
+    private fun extractBaseType(type: PsiType): String {
+        return when (type) {
+            is PsiArrayType -> extractBaseType(type.componentType)
+            is PsiClassType -> type.rawType().presentableText
+            is PsiPrimitiveType -> type.presentableText
+            else -> type.presentableText
+        }
+    }
+
+    private fun extractTypeParameters(type: PsiType): List<TypeInfo>? {
+        return when (type) {
+            is PsiClassType -> {
+                val params = type.parameters
+                if (params.isNotEmpty()) {
+                    params.map { param ->
+                        TypeInfo(
+                            displayName = param.presentableText,
+                            baseType = extractBaseType(param),
+                            typeParameters = extractTypeParameters(param),
+                            isArray = param is PsiArrayType
+                        )
+                    }
+                } else null
+            }
+
+            else -> null
+        }
+    }
+
+    private fun extractDocSummary(docComment: PsiDocComment): String {
+        val descriptionElements = docComment.descriptionElements
+        val text = descriptionElements.joinToString("") { it.text }.trim()
+        val firstSentence = text.substringBefore(". ").trim()
+        return if (firstSentence.isNotEmpty()) "$firstSentence." else text.take(100)
+    }
+
+    private fun buildMethodSignature(method: PsiMethod): String {
+        val params = method.parameterList.parameters.joinToString(", ") { param ->
+            "${param.type.presentableText} ${param.name}"
+        }
+        val returnType = method.returnType?.presentableText ?: "void"
+        return "${method.name}($params): $returnType"
+    }
+
+    private fun isBuiltinAnnotation(annotation: String): Boolean {
+        val builtin = setOf(
+            "@Override", "@Deprecated", "@SuppressWarnings",
+            "@FunctionalInterface", "@SafeVarargs"
+        )
+        return builtin.contains(annotation)
     }
 }

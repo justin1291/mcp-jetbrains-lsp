@@ -1,0 +1,8 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"/>
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"/>
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor"/>
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder"/>
+    </extensions>
+</idea-plugin>
