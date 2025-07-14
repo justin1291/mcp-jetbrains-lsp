@@ -1,5 +1,6 @@
 package dev.mcp.extensions.lsp.languages.java
 
+import com.intellij.openapi.components.Service
 import com.intellij.psi.*
 import com.intellij.psi.javadoc.PsiDocComment
 import dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor
@@ -15,6 +16,7 @@ import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
  *
  * Registered as a service in mcp-lsp-java.xml when Java module is available.
  */
+@Service
 class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
 
     override fun extractSymbolsFlat(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {

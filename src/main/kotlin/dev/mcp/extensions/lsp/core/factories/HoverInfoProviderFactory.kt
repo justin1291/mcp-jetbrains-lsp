@@ -1,20 +1,22 @@
 package dev.mcp.extensions.lsp.core.factories
 
 import com.intellij.lang.Language
-import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import dev.mcp.extensions.lsp.core.interfaces.HoverInfoProvider
-import dev.mcp.extensions.lsp.languages.java.JavaHoverInfoProvider
-import dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider
+import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
 
 /**
  * Factory for creating language-specific hover info providers.
- * Uses IntelliJ's service mechanism to load only available implementations.
+ * Uses dynamic service loading to avoid compile-time dependencies on optional language support.
  */
 object HoverInfoProviderFactory {
     private val logger = Logger.getInstance(HoverInfoProviderFactory::class.java)
+
+    // Service class names - no direct imports needed
+    private const val JAVA_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.java.JavaHoverInfoProvider"
+    private const val PYTHON_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"
 
     /**
      * Get the appropriate hover info provider for a given file.
@@ -46,26 +48,16 @@ object HoverInfoProviderFactory {
 
         logger.info("Determining hover info provider for language: $languageId ($languageName)")
 
-        // Try to get language-specific service
+        // Try to get language-specific service using dynamic loading
         val provider = when {
             isJavaOrKotlin(language) -> {
                 logger.debug("Looking for Java/Kotlin hover info provider service")
-                try {
-                    service<JavaHoverInfoProvider>()
-                } catch (e: Exception) {
-                    logger.debug("Java hover info provider service not available: ${e.message}")
-                    null
-                }
+                DynamicServiceLoader.loadHoverInfoProvider(JAVA_HOVER_INFO_PROVIDER)
             }
 
             isPython(language) -> {
                 logger.debug("Looking for Python hover info provider service")
-                try {
-                    service<dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider>()
-                } catch (e: Exception) {
-                    logger.debug("Python hover info provider service not available: ${e.message}")
-                    null
-                }
+                DynamicServiceLoader.loadHoverInfoProvider(PYTHON_HOVER_INFO_PROVIDER)
             }
 
             else -> null

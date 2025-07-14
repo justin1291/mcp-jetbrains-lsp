@@ -1,5 +1,7 @@
 package dev.mcp.extensions.lsp.languages.python
 
+import com.intellij.openapi.components.Service
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.jetbrains.python.psi.*
 import dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor
@@ -15,7 +17,124 @@ import dev.mcp.extensions.lsp.core.utils.symbol
  * 
  * Registered as a service in mcp-lsp-python.xml when Python module is available.
  */
+@Service
 class PythonSymbolExtractor : PythonBaseHandler(), SymbolExtractor {
+    
+    // Python-specific utility methods (duplicated to avoid class loading issues)
+    
+    /**
+     * Extract decorators from a decoratable element.
+     */
+    private fun extractDecorators(decorated: PyDecoratable): List<String> {
+        return decorated.decoratorList?.decorators?.map { decorator ->
+            "@${decorator.name ?: decorator.text}"
+        } ?: emptyList()
+    }
+    
+    /**
+     * Check if an element is async.
+     */
+    private fun isAsync(element: PsiElement): Boolean {
+        return when (element) {
+            is PyFunction -> element.isAsync
+            else -> false
+        }
+    }
+    
+    /**
+     * Extract return type hint from a function.
+     */
+    private fun extractReturnTypeHint(function: PyFunction): String? {
+        return function.annotation?.value?.text
+    }
+    
+    /**
+     * Check if a function is a property (has @property decorator).
+     */
+    private fun isProperty(function: PyFunction): Boolean {
+        return extractDecorators(function).any { it == "@property" }
+    }
+    
+    /**
+     * Get the type of method (static, class, instance, property).
+     */
+    private fun getMethodType(function: PyFunction): String {
+        val decorators = extractDecorators(function)
+        return when {
+            decorators.contains("@staticmethod") -> "static"
+            decorators.contains("@classmethod") -> "class"
+            decorators.contains("@property") -> "property"
+            else -> "instance"
+        }
+    }
+    
+    /**
+     * Check if a class is a dataclass.
+     */
+    private fun isDataclass(pyClass: PyClass): Boolean {
+        return extractDecorators(pyClass).any { 
+            it.contains("dataclass", ignoreCase = true) 
+        }
+    }
+    
+    /**
+     * Extract docstring from an element.
+     */
+    private fun extractDocstring(element: PyDocStringOwner): String? {
+        return element.docStringValue
+    }
+    
+    /**
+     * Check if a variable is relevant (not a loop variable, etc.).
+     */
+    private fun isRelevantVariable(target: PyTargetExpression): Boolean {
+        val parent = target.parent
+        return parent !is PyForPart &&
+               parent !is PyComprehensionElement &&
+               parent !is PyWithItem
+    }
+    
+    /**
+     * Get Python-specific modifiers for an element.
+     */
+    private fun getPythonModifiers(element: PsiElement): List<String> {
+        val modifiers = mutableListOf<String>()
+        
+        when (element) {
+            is PyFunction -> {
+                if (element.isAsync) modifiers.add("async")
+                if (element.isGenerator) modifiers.add("generator")
+                val decorators = extractDecorators(element)
+                if (decorators.contains("@abstractmethod")) modifiers.add("abstract")
+                if (decorators.contains("@staticmethod")) modifiers.add("static")
+                if (decorators.contains("@classmethod")) modifiers.add("class")
+                if (decorators.contains("@property")) modifiers.add("property")
+            }
+            is PyClass -> {
+                if (hasAbstractMethods(element)) modifiers.add("abstract")
+                if (isDataclass(element)) modifiers.add("dataclass")
+            }
+        }
+        
+        return modifiers
+    }
+    
+    /**
+     * Check if a class has abstract methods (making it abstract).
+     */
+    private fun hasAbstractMethods(pyClass: PyClass): Boolean {
+        // Check if inherits from ABC
+        val inheritsFromABC = pyClass.superClassExpressions.any { expr ->
+            expr.text.contains("ABC") || expr.text.contains("ABCMeta")
+        }
+        
+        // Check if has any methods with @abstractmethod
+        val hasAbstractMethod = pyClass.methods.any { method ->
+            extractDecorators(method).contains("@abstractmethod")
+        }
+        
+        return inheritsFromABC || hasAbstractMethod
+    }
     
     override fun extractSymbolsFlat(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
         logger.info("Extracting symbols (flat) from Python file: ${psiFile.name}")

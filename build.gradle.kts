@@ -16,7 +16,6 @@ repositories {
     }
 }
 
-// Configure IntelliJ Platform Gradle Plugin
 dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2025.1")
@@ -57,26 +56,21 @@ intellijPlatform {
 
     pluginVerification {
         ides {
-            ide("IC-2024.3")
+            ide("IC-2025.1")
         }
     }
 }
 
 tasks {
-    // Set the JVM compatibility versions
     withType<JavaCompile> {
         sourceCompatibility = "21"
         targetCompatibility = "21"
     }
 
     test {
-        // Use JUnit Platform (JUnit 5)
+
         useJUnitPlatform()
-
-        // Increase memory for tests
         jvmArgs("-Xmx2048m")
-
-        // Show test output
         testLogging {
             events("passed", "skipped", "failed")
             showStandardStreams = true

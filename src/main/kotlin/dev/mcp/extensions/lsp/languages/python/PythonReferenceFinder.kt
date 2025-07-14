@@ -1,5 +1,6 @@
 package dev.mcp.extensions.lsp.languages.python
 
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
@@ -33,7 +34,58 @@ import dev.mcp.extensions.lsp.core.utils.PsiUtils
  * Note: Uses some experimental Python PSI APIs which may change in future IntelliJ versions.
  * The @ApiStatus.Experimental warnings are expected and acceptable for this implementation.
  */
+@Service
 class PythonReferenceFinder : PythonBaseHandler(), ReferenceFinder {
+    
+    // Python-specific utility methods (duplicated to avoid class loading issues)
+    
+    /**
+     * Extract decorators from a decoratable element.
+     */
+    private fun extractDecorators(decorated: PyDecoratable): List<String> {
+        return decorated.decoratorList?.decorators?.map { decorator ->
+            "@${decorator.name ?: decorator.text}"
+        } ?: emptyList()
+    }
+    
+    /**
+     * Check if a class is a dataclass.
+     */
+    private fun isDataclass(pyClass: PyClass): Boolean {
+        return extractDecorators(pyClass).any { 
+            it.contains("dataclass", ignoreCase = true) 
+        }
+    }
+    
+    /**
+     * Check if a function is a property (has @property decorator).
+     */
+    private fun isProperty(function: PyFunction): Boolean {
+        return extractDecorators(function).any { it == "@property" }
+    }
+    
+    /**
+     * Check if an element is async.
+     */
+    private fun isAsync(element: PsiElement): Boolean {
+        return when (element) {
+            is PyFunction -> element.isAsync
+            else -> false
+        }
+    }
+    
+    /**
+     * Get the type of method (static, class, instance, property).
+     */
+    private fun getMethodType(function: PyFunction): String {
+        val decorators = extractDecorators(function)
+        return when {
+            decorators.contains("@staticmethod") -> "static"
+            decorators.contains("@classmethod") -> "class"
+            decorators.contains("@property") -> "property"
+            else -> "instance"
+        }
+    }
     
     override fun findReferences(project: Project, element: PsiElement, args: FindReferencesArgs): List<ReferenceInfo> {
         logger.info("Finding references for Python element: ${getElementName(element)}")

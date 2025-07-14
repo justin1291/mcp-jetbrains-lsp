@@ -1,0 +1,2 @@
+dev.mcp.extensions.lsp.languages.java.JavaHoverInfoProvider
+dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider
