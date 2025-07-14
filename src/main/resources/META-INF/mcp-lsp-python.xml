@@ -1,8 +1,8 @@
 <idea-plugin>
-    <!-- Python language support configuration -->
-    <!-- This file is only loaded when com.intellij.modules.python is available -->
-    
-    <!-- Services are now light services with @Service annotation - no XML registration needed! -->
-    
-    <!-- Future: Add any Python-specific extensions here if needed -->
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"/>
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"/>
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor"/>
+        <projectService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder"/>
+    </extensions>
 </idea-plugin>

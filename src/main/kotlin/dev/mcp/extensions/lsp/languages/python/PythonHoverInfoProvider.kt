@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.python
 
-import com.intellij.openapi.components.Service
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
@@ -16,11 +15,11 @@ import dev.mcp.extensions.lsp.core.models.HoverInfo
  *
  * Registered as a service in mcp-lsp-python.xml when Python module is available.
  */
-@Service
+
 class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
-    
+
     // Python-specific utility methods (duplicated to avoid class loading issues)
-    
+
     /**
      * Extract decorators from a decoratable element.
      */
@@ -29,16 +28,16 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
             "@${decorator.name ?: decorator.text}"
         } ?: emptyList()
     }
-    
+
     /**
      * Check if a class is a dataclass.
      */
     private fun isDataclass(pyClass: PyClass): Boolean {
-        return extractDecorators(pyClass).any { 
-            it.contains("dataclass", ignoreCase = true) 
+        return extractDecorators(pyClass).any {
+            it.contains("dataclass", ignoreCase = true)
         }
     }
-    
+
     /**
      * Check if an element is async.
      */
@@ -48,14 +47,14 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
             else -> false
         }
     }
-    
+
     /**
      * Check if a function is a property (has @property decorator).
      */
     private fun isProperty(function: PyFunction): Boolean {
         return extractDecorators(function).any { it == "@property" }
     }
-    
+
     /**
      * Get the type of method (static, class, instance, property).
      */
@@ -68,27 +67,27 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
             else -> "instance"
         }
     }
-    
+
     /**
      * Extract return type hint from a function.
      */
     private fun extractReturnTypeHint(function: PyFunction): String? {
         return function.annotation?.value?.text
     }
-    
+
     /**
      * Extract docstring from an element.
      */
     private fun extractDocstring(element: PyDocStringOwner): String? {
         return element.docStringValue
     }
-    
+
     /**
      * Get Python-specific modifiers for an element.
      */
     private fun getPythonModifiers(element: PsiElement): List<String> {
         val modifiers = mutableListOf<String>()
-        
+
         when (element) {
             is PyFunction -> {
                 if (element.isAsync) modifiers.add("async")
@@ -99,15 +98,16 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
                 if (decorators.contains("@classmethod")) modifiers.add("class")
                 if (decorators.contains("@property")) modifiers.add("property")
             }
+
             is PyClass -> {
                 if (hasAbstractMethods(element)) modifiers.add("abstract")
                 if (isDataclass(element)) modifiers.add("dataclass")
             }
         }
-        
+
         return modifiers
     }
-    
+
     /**
      * Check if a class has abstract methods (making it abstract).
      */
@@ -116,17 +116,23 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
         val inheritsFromABC = pyClass.superClassExpressions.any { expr ->
             expr.text.contains("ABC") || expr.text.contains("ABCMeta")
         }
-        
+
         // Check if has any methods with @abstractmethod
         val hasAbstractMethod = pyClass.methods.any { method ->
             extractDecorators(method).contains("@abstractmethod")
         }
-        
+
         return inheritsFromABC || hasAbstractMethod
     }
 
     override fun getHoverInfo(element: PsiElement): HoverInfo {
-        logger.info("Getting hover info for Python element: ${when (element) { is PyClass -> element.name; is PyFunction -> element.name; else -> "unknown" }}")
+        logger.info(
+            "Getting hover info for Python element: ${
+                when (element) {
+                    is PyClass -> element.name; is PyFunction -> element.name; else -> "unknown"
+                }
+            }"
+        )
 
         return when (element) {
             is PyClass -> createClassHoverInfo(element)
@@ -150,7 +156,12 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
 
         // Get the most relevant element
         val targetElement = resolved
-            ?: PsiTreeUtil.getParentOfType(element, PyClass::class.java, PyFunction::class.java, PyTargetExpression::class.java)
+            ?: PsiTreeUtil.getParentOfType(
+                element,
+                PyClass::class.java,
+                PyFunction::class.java,
+                PyTargetExpression::class.java
+            )
             ?: element
 
         return getHoverInfo(targetElement)
@@ -338,7 +349,7 @@ class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
             is PyTargetExpression -> element.name
             else -> element.text?.take(50)
         } ?: "unknown"
-        
+
         return HoverInfo(
             elementName = elementName,
             elementType = element.javaClass.simpleName.lowercase()

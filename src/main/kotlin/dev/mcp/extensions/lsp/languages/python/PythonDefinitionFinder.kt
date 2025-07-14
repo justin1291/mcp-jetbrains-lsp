@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.python
 
-import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
@@ -15,14 +14,14 @@ import dev.mcp.extensions.lsp.core.models.DefinitionLocation
 
 /**
  * Definition finder implementation for Python language.
- * 
+ *
  * Registered as a service in mcp-lsp-python.xml when Python module is available.
  */
-@Service
+
 class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
-    
+
     // Python-specific utility methods (duplicated to avoid class loading issues)
-    
+
     /**
      * Extract decorators from a decoratable element.
      */
@@ -31,16 +30,16 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             "@${decorator.name ?: decorator.text}"
         } ?: emptyList()
     }
-    
+
     /**
      * Check if a class is a dataclass.
      */
     private fun isDataclass(pyClass: PyClass): Boolean {
-        return extractDecorators(pyClass).any { 
-            it.contains("dataclass", ignoreCase = true) 
+        return extractDecorators(pyClass).any {
+            it.contains("dataclass", ignoreCase = true)
         }
     }
-    
+
     /**
      * Check if an element is async.
      */
@@ -50,20 +49,20 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             else -> false
         }
     }
-    
+
     /**
      * Extract return type hint from a function.
      */
     private fun extractReturnTypeHint(function: PyFunction): String? {
         return function.annotation?.value?.text
     }
-    
+
     /**
      * Get Python-specific modifiers for an element.
      */
     private fun getPythonModifiers(element: PsiElement): List<String> {
         val modifiers = mutableListOf<String>()
-        
+
         when (element) {
             is PyFunction -> {
                 if (element.isAsync) modifiers.add("async")
@@ -74,15 +73,16 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
                 if (decorators.contains("@classmethod")) modifiers.add("class")
                 if (decorators.contains("@property")) modifiers.add("property")
             }
+
             is PyClass -> {
                 if (hasAbstractMethods(element)) modifiers.add("abstract")
                 if (isDataclass(element)) modifiers.add("dataclass")
             }
         }
-        
+
         return modifiers
     }
-    
+
     /**
      * Check if a class has abstract methods (making it abstract).
      */
@@ -91,19 +91,19 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
         val inheritsFromABC = pyClass.superClassExpressions.any { expr ->
             expr.text.contains("ABC") || expr.text.contains("ABCMeta")
         }
-        
+
         // Check if has any methods with @abstractmethod
         val hasAbstractMethod = pyClass.methods.any { method ->
             extractDecorators(method).contains("@abstractmethod")
         }
-        
+
         return inheritsFromABC || hasAbstractMethod
     }
-    
+
     override fun findDefinitionByPosition(psiFile: PsiFile, position: Int): List<DefinitionLocation> {
         logger.info("Finding Python definition at position $position in ${psiFile.name}")
-        
-        val element = psiFile.findElementAt(position) 
+
+        val element = psiFile.findElementAt(position)
             ?: return emptyList()
 
         // Find the reference at this position
@@ -135,10 +135,10 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
 
         return emptyList()
     }
-    
+
     override fun findDefinitionByName(project: Project, symbolName: String): List<DefinitionLocation> {
         logger.info("Finding Python definition by name: $symbolName")
-        
+
         val scope = GlobalSearchScope.projectScope(project)
         val definitions = mutableListOf<DefinitionLocation>()
 
@@ -149,7 +149,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
                 // Search for method/attribute in specific class
                 val className = parts[0]
                 val memberName = parts[1]
-                
+
                 // Find classes with the given name
                 val classes = PyClassNameIndex.find(className, project, scope)
                 for (pyClass in classes) {
@@ -164,7 +164,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
                             )
                         )
                     }
-                    
+
                     // Look for attributes/fields
                     val attributes = pyClass.findClassAttribute(memberName, true, null)
                     if (attributes != null) {
@@ -209,11 +209,11 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
 
         // Sort by confidence (highest first)
         val sortedDefinitions = definitions.sortedByDescending { it.confidence }
-        
+
         logger.debug("Found ${sortedDefinitions.size} Python definitions for '$symbolName'")
         return sortedDefinitions
     }
-    
+
     override fun createLocation(element: PsiElement, searchTerm: String?): DefinitionLocation {
         val containingFile = element.containingFile
         val virtualFile = containingFile.virtualFile
@@ -301,21 +301,21 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             )
         }
     }
-    
+
     override fun supportsFile(psiFile: PsiFile): Boolean {
         val languageId = psiFile.language.id
         return languageId == "Python" || languageId == "PythonCore"
     }
-    
+
     override fun supportsElement(element: PsiElement): Boolean {
         val languageId = element.language.id
         return languageId == "Python" || languageId == "PythonCore"
     }
-    
+
     override fun getSupportedLanguage(): String {
         return "Python"
     }
-    
+
     /**
      * Find a named Python element at the given position.
      */
@@ -326,7 +326,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             ?: PsiTreeUtil.getParentOfType(element, PyTargetExpression::class.java)
             ?: PsiTreeUtil.getParentOfType(element, PyParameter::class.java)
     }
-    
+
     /**
      * Get the name of a Python element.
      */
@@ -339,7 +339,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             else -> "unknown"
         }
     }
-    
+
     private fun determineClassType(pyClass: PyClass): String {
         val decorators = extractDecorators(pyClass)
         return when {
@@ -349,7 +349,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             else -> "class"
         }
     }
-    
+
     private fun determineFunctionType(pyFunction: PyFunction): String {
         val decorators = extractDecorators(pyFunction)
         return when {
@@ -364,23 +364,24 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             else -> "function"
         }
     }
-    
+
     private fun determineVariableType(target: PyTargetExpression): String {
         val name = target.name ?: ""
         return when {
             isConstant(name) -> "constant"
-            target.parent is PyAssignmentStatement && 
-                PsiTreeUtil.getParentOfType(target, PyClass::class.java) != null -> "field"
+            target.parent is PyAssignmentStatement &&
+                    PsiTreeUtil.getParentOfType(target, PyClass::class.java) != null -> "field"
+
             target.parent is PyAssignmentStatement -> "variable"
             else -> "variable"
         }
     }
-    
+
     private fun buildClassSignature(pyClass: PyClass): String {
         val decorators = extractDecorators(pyClass).joinToString(" ")
         val baseClasses = pyClass.superClassExpressions.joinToString(", ") { it.text }
         val bases = if (baseClasses.isNotEmpty()) "($baseClasses)" else ""
-        
+
         return "${decorators}class ${pyClass.name}$bases".trim()
     }
 
@@ -392,7 +393,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             "${parameter.name}${defaultValue}"
         }
         val returnType = extractReturnTypeHint(pyFunction)?.let { " -> $it" } ?: ""
-        
+
         return "${decorators}${async}def ${pyFunction.name}($params)$returnType".trim()
     }
 
@@ -400,10 +401,10 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
         val assignedValue = target.findAssignedValue()?.text
         val typeHint = target.annotation?.text?.let { ": $it" } ?: ""
         val value = assignedValue?.let { " = $it" } ?: ""
-        
+
         return "${target.name}$typeHint$value".trim()
     }
-    
+
     private fun buildParameterSignature(parameter: PyParameter): String {
         val defaultValue = parameter.defaultValue?.text?.let { " = $it" } ?: ""
         return "${parameter.name}${defaultValue}".trim()
@@ -413,21 +414,21 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
         val containingClass = PsiTreeUtil.getParentOfType(element, PyClass::class.java)
         return containingClass?.qualifiedName ?: containingClass?.name
     }
-    
+
     private fun getVariableModifiers(target: PyTargetExpression): List<String> {
         val modifiers = mutableListOf<String>()
         val name = target.name ?: ""
-        
+
         when (getPythonVisibility(name)) {
             "private" -> modifiers.add("private")
             "protected" -> modifiers.add("protected")
             "public" -> modifiers.add("public")
         }
-        
+
         if (isConstant(name)) {
             modifiers.add("constant")
         }
-        
+
         return modifiers
     }
 
@@ -460,7 +461,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             is PyFunction -> {
                 val containingClass = PsiTreeUtil.getParentOfType(element, PyClass::class.java)?.name ?: "module"
                 val decorators = extractDecorators(element)
-                
+
                 when {
                     element.name == "__init__" -> "Constructor in $containingClass"
                     decorators.contains("@staticmethod") -> "Static method in $containingClass"
@@ -477,10 +478,10 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             is PyTargetExpression -> {
                 val containingClass = PsiTreeUtil.getParentOfType(element, PyClass::class.java)?.name
                 val name = element.name ?: ""
-                
+
                 when {
                     containingClass != null && isConstant(name) -> "Constant in $containingClass"
-                    containingClass != null -> "Attribute in $containingClass" 
+                    containingClass != null -> "Attribute in $containingClass"
                     isConstant(name) -> "Module constant"
                     else -> "Module variable"
                 }
@@ -489,7 +490,7 @@ class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
             is PyClass -> {
                 val packageName = element.containingFile.name.removeSuffix(".py")
                 val decorators = extractDecorators(element)
-                
+
                 when {
                     decorators.any { it.contains("dataclass", ignoreCase = true) } -> "Dataclass in $packageName"
                     decorators.any { it.contains("enum", ignoreCase = true) } -> "Enum in $packageName"
