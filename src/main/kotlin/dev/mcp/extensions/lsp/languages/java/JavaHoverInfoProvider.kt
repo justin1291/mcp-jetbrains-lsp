@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.java
 
-import com.intellij.openapi.components.Service
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ClassInheritorsSearch
@@ -14,9 +13,8 @@ import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 /**
  * Hover info provider implementation for Java and Kotlin languages.
  * 
- * This is a light service - automatically registered when Java module is available.
+ * Registered as a service in mcp-lsp-java.xml when Java module is available.
  */
-@Service
 class JavaHoverInfoProvider : BaseLanguageHandler(), HoverInfoProvider {
     
     override fun getHoverInfo(element: PsiElement): HoverInfo {

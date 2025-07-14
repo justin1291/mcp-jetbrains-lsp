@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.python
 
-import com.intellij.openapi.components.Service
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
@@ -14,9 +13,8 @@ import dev.mcp.extensions.lsp.core.models.HoverInfo
 /**
  * Hover info provider implementation for Python language.
  *
- * This is a light service - automatically registered when Python module is available.
+ * Registered as a service in mcp-lsp-python.xml when Python module is available.
  */
-@Service
 class PythonHoverInfoProvider : PythonBaseHandler(), HoverInfoProvider {
 
     override fun getHoverInfo(element: PsiElement): HoverInfo {

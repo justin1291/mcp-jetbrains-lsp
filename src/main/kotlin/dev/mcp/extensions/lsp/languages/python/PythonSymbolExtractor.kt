@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.python
 
-import com.intellij.openapi.components.Service
 import com.intellij.psi.PsiFile
 import com.jetbrains.python.psi.*
 import dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor
@@ -14,9 +13,8 @@ import dev.mcp.extensions.lsp.core.utils.symbol
  * Symbol extractor implementation for Python language.
  * Requires Python plugin to be installed at runtime.
  * 
- * This is a light service - automatically registered when Python module is available.
+ * Registered as a service in mcp-lsp-python.xml when Python module is available.
  */
-@Service
 class PythonSymbolExtractor : PythonBaseHandler(), SymbolExtractor {
     
     override fun extractSymbolsFlat(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {

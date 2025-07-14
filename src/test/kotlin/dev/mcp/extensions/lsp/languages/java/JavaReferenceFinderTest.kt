@@ -4,7 +4,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.psi.PsiElement
 import dev.mcp.extensions.lsp.JavaBaseTest
 import dev.mcp.extensions.lsp.core.models.FindReferencesArgs
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -19,14 +18,8 @@ import kotlin.test.assertTrue
  */
 @Disabled
 class JavaReferenceFinderTest : JavaBaseTest() {
-    
-    private lateinit var finder: JavaReferenceFinder
-    
-    @BeforeEach
-    override fun setUp() {
-        super.setUp()
-        finder = JavaReferenceFinder()
-    }
+
+    private val finder: JavaReferenceFinder = JavaReferenceFinder()
 
     @Test
     fun testFindFieldReferences() {
@@ -37,27 +30,29 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: users field not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: users field references not found through global search")
                 return@runReadAction
             }
-            
+
             // Verify references are found in UserService methods
             val containingMethods = references.map { it.containingMethod }.toSet()
-            assertTrue(containingMethods.contains("addUser") || 
-                      containingMethods.contains("findUser") ||
-                      containingMethods.contains("removeUser"),
-                "Should find references in UserService methods")
-            
+            assertTrue(
+                containingMethods.contains("addUser") ||
+                        containingMethods.contains("findUser") ||
+                        containingMethods.contains("removeUser"),
+                "Should find references in UserService methods"
+            )
+
             // Test grouped result generation
             val result = finder.createGroupedResult(references, element)
             assertNotNull(result, "Should create grouped result")
@@ -74,29 +69,31 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: addUser method not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: addUser method references not found through global search")
                 return@runReadAction
             }
-            
+
             // Should find method call references
             val methodCalls = references.filter { it.usageType == "method_call" }
-            assertTrue(methodCalls.isNotEmpty() || references.isNotEmpty(),
-                "Should find addUser method references")
-            
+            assertTrue(
+                methodCalls.isNotEmpty() || references.isNotEmpty(),
+                "Should find addUser method references"
+            )
+
             // Verify data flow context is populated
             val hasDataFlowContext = references.any { it.dataFlowContext != null }
             assertTrue(hasDataFlowContext, "Should have data flow context for some references")
-            
+
             // Test grouped result
             val result = finder.createGroupedResult(references, element)
             assertNotNull(result.usagesByType, "Should have usagesByType grouping")
@@ -112,23 +109,25 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: DEFAULT_ROLE constant not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: DEFAULT_ROLE constant references not found through global search")
                 return@runReadAction
             }
-            
+
             // Should find references to DEFAULT_ROLE constant
-            assertTrue(references.any { it.usageType == "field_read" || it.usageType == "field_as_argument" },
-                "Should find read references to DEFAULT_ROLE")
+            assertTrue(
+                references.any { it.usageType == "field_read" || it.usageType == "field_as_argument" },
+                "Should find read references to DEFAULT_ROLE"
+            )
         }
     }
 
@@ -141,26 +140,28 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: User class not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: User constructor references not found through global search")
                 return@runReadAction
             }
-            
+
             // Test grouped result
             val result = finder.createGroupedResult(references, element)
             val constructorRefs = result.usagesByType["constructor_call"] ?: emptyList()
             val typeRefs = result.usagesByType.filterKeys { it.contains("type") }.values.flatten()
-            assertTrue(constructorRefs.isNotEmpty() || typeRefs.isNotEmpty(),
-                "Should find User constructor or type references")
+            assertTrue(
+                constructorRefs.isNotEmpty() || typeRefs.isNotEmpty(),
+                "Should find User constructor or type references"
+            )
         }
     }
 
@@ -173,20 +174,20 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = true
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: userService field not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: userService references not found through global search")
                 return@runReadAction
             }
-            
+
             // Should include declaration when requested
             val declarationRef = references.find { it.usageType == "declaration" }
             if (declarationRef != null) {
@@ -204,23 +205,25 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: userService field not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: userService references not found through global search")
                 return@runReadAction
             }
-            
+
             // Should find userService field references in ApiController
-            assertTrue(references.any { it.containingClass?.contains("ApiController") ?: false },
-                "Should find userService references in ApiController")
+            assertTrue(
+                references.any { it.containingClass?.contains("ApiController") ?: false },
+                "Should find userService references in ApiController"
+            )
         }
     }
 
@@ -233,31 +236,33 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: User class not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: User references not found through global search")
                 return@runReadAction
             }
-            
+
             val result = finder.createGroupedResult(references, element)
-            
+
             // Verify grouped structure
             assertNotNull(result.summary, "Should have summary")
             assertNotNull(result.usagesByType, "Should have usagesByType")
             assertNotNull(result.insights, "Should have insights")
             assertNotNull(result.allReferences, "Should have allReferences")
-            
+
             // Verify summary statistics
-            assertEquals(references.size, result.summary.totalReferences, 
-                "Summary total should match reference count")
+            assertEquals(
+                references.size, result.summary.totalReferences,
+                "Summary total should match reference count"
+            )
             assertTrue(result.summary.fileCount > 0, "Should have file count")
         }
     }
@@ -272,22 +277,22 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: processData method not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: processData references not found through global search")
                 return@runReadAction
             }
-            
+
             val result = finder.createGroupedResult(references, element)
-            
+
             // Check if test coverage insight is generated
             if (!result.summary.hasTestUsages) {
                 val hasTestInsight = result.insights.any { it.contains("No usage found in test code") }
@@ -305,16 +310,16 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: User class not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
             val result = finder.createGroupedResult(references, element)
-            
+
             if (result.allReferences.size > 2) {
                 // Should identify primary usage location when there are multiple references
                 val primaryUsageInsight = result.insights.find { it.contains("Primary usage is in") }
@@ -332,27 +337,29 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: name field not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: name field references not found through global search")
                 return@runReadAction
             }
-            
+
             // Check various data flow contexts
             val dataFlowContexts = references.mapNotNull { it.dataFlowContext }.toSet()
             println("Found data flow contexts: $dataFlowContexts")
-            
+
             // Should have at least some data flow context
-            assertTrue(dataFlowContexts.isNotEmpty() || references.isEmpty(),
-                "Should have data flow context for references")
+            assertTrue(
+                dataFlowContexts.isNotEmpty() || references.isEmpty(),
+                "Should have data flow context for references"
+            )
         }
     }
 
@@ -365,26 +372,28 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: isValidUser static method not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: isValidUser static method references not found through global search")
                 return@runReadAction
             }
-            
+
             val result = finder.createGroupedResult(references, element)
-            
+
             // Should find static method references
             val staticMethodCalls = result.usagesByType["static_method_call"] ?: emptyList()
-            assertTrue(staticMethodCalls.isNotEmpty() || references.isNotEmpty(),
-                "Should find isValidUser static method references")
+            assertTrue(
+                staticMethodCalls.isNotEmpty() || references.isNotEmpty(),
+                "Should find isValidUser static method references"
+            )
         }
     }
 
@@ -398,29 +407,31 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: User class not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isEmpty()) {
                 println("PSI indexing limitation: User cross-file references not found through global search")
                 return@runReadAction
             }
-            
+
             val result = finder.createGroupedResult(references, element)
-            
+
             // Should find User references in multiple files
             val fileRefs = references.map { it.filePath }.toSet()
             assertTrue(fileRefs.size >= 1, "Should find User references across files")
-            
+
             // Verify file count in summary
-            assertEquals(fileRefs.size, result.summary.fileCount, 
-                "Summary file count should match actual file count")
+            assertEquals(
+                fileRefs.size, result.summary.fileCount,
+                "Summary file count should match actual file count"
+            )
         }
     }
 
@@ -433,15 +444,15 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             assertNull(element, "Should not find non-existent symbol")
-            
+
             // Test with empty references
             val emptyReferences = emptyList<dev.mcp.extensions.lsp.core.models.ReferenceInfo>()
             val dummyElement = createDummyElement()
             val result = finder.createGroupedResult(emptyReferences, dummyElement)
-            
+
             assertTrue(result.allReferences.isEmpty(), "Should return empty references when not found")
             assertEquals(0, result.summary.totalReferences, "Should have 0 total references")
         }
@@ -457,24 +468,24 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: id field not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isNotEmpty()) {
                 val result = finder.createGroupedResult(references, element)
-                
+
                 // Check if we only have reads and no writes
                 val writeCount = references.count { it.usageType == "field_write" }
-                val readCount = references.count { 
-                    it.usageType == "field_read" || it.usageType == "field_as_argument" 
+                val readCount = references.count {
+                    it.usageType == "field_read" || it.usageType == "field_as_argument"
                 }
-                
+
                 if (writeCount == 0 && readCount > 0) {
                     val finalInsight = result.insights.find { it.contains("consider making it final") }
                     assertNotNull(finalInsight, "Should suggest making read-only field final")
@@ -487,23 +498,27 @@ class JavaReferenceFinderTest : JavaBaseTest() {
     fun testSupportsElement() {
         ApplicationManager.getApplication().runReadAction {
             val userPath = "src/main/java/com/example/demo/User.java"
-            
+
             val virtualFile = myFixture.findFileInTempDir(userPath)
             assertNotNull(virtualFile, "User.java should exist in test project")
-            
+
             val psiFile = myFixture.psiManager.findFile(virtualFile)
             assertNotNull(psiFile, "Should be able to get PSI file")
-            
+
             // Find any element in the file to test supportsElement
             val element = psiFile.firstChild
             if (element != null) {
                 // The finder should support Java elements
-                assertTrue(finder.supportsElement(element) || element.language.id == "JAVA",
-                    "Should support Java elements")
+                assertTrue(
+                    finder.supportsElement(element) || element.language.id == "JAVA",
+                    "Should support Java elements"
+                )
             }
-            
-            assertEquals("Java/Kotlin", finder.getSupportedLanguage(), 
-                "Should return correct supported language")
+
+            assertEquals(
+                "Java/Kotlin", finder.getSupportedLanguage(),
+                "Should return correct supported language"
+            )
         }
     }
 
@@ -511,17 +526,17 @@ class JavaReferenceFinderTest : JavaBaseTest() {
     fun testPositionBasedSearch() {
         ApplicationManager.getApplication().runReadAction {
             val userServicePath = "src/main/java/com/example/demo/UserService.java"
-            
+
             val virtualFile = myFixture.findFileInTempDir(userServicePath)
             assertNotNull(virtualFile, "UserService.java should exist in test project")
-            
+
             val psiFile = myFixture.psiManager.findFile(virtualFile)
             assertNotNull(psiFile, "Should be able to get PSI file")
-            
+
             // Find a specific position within a method call or field access
             val fileText = psiFile.text
             val usersFieldPosition = fileText.indexOf("users.add", 500) // Look for field usage
-            
+
             if (usersFieldPosition >= 0) {
                 val args = FindReferencesArgs(
                     symbolName = null,
@@ -529,14 +544,16 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                     position = usersFieldPosition + 1, // Position on "users"
                     includeDeclaration = false
                 )
-                
+
                 val element = finder.findTargetElement(project, args)
                 if (element != null) {
                     val references = finder.findReferences(project, element, args)
                     if (references.isNotEmpty()) {
                         // Should find references to the field at this position
-                        assertTrue(references.any { it.usageType.contains("field") },
-                            "Should find field references when positioned on field usage")
+                        assertTrue(
+                            references.any { it.usageType.contains("field") },
+                            "Should find field references when positioned on field usage"
+                        )
                     }
                 }
             }
@@ -552,25 +569,27 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 position = null,
                 includeDeclaration = false
             )
-            
+
             val element = finder.findTargetElement(project, args)
             if (element == null) {
                 println("PSI indexing limitation: users field not found through global search")
                 return@runReadAction
             }
-            
+
             val references = finder.findReferences(project, element, args)
-            
+
             if (references.isNotEmpty()) {
                 // Check that usage types are properly classified
                 val usageTypes = references.map { it.usageType }.toSet()
-                
+
                 // Should have specific field usage types
                 val expectedTypes = setOf("field_read", "field_write", "field_as_argument", "field_condition_check")
                 val foundExpectedTypes = usageTypes.intersect(expectedTypes)
-                
-                assertTrue(foundExpectedTypes.isNotEmpty() || usageTypes.any { it.contains("field") },
-                    "Should classify field usage types correctly. Found: $usageTypes")
+
+                assertTrue(
+                    foundExpectedTypes.isNotEmpty() || usageTypes.any { it.contains("field") },
+                    "Should classify field usage types correctly. Found: $usageTypes"
+                )
             }
         }
     }
@@ -579,18 +598,18 @@ class JavaReferenceFinderTest : JavaBaseTest() {
     fun testCreateReferenceInfo() {
         ApplicationManager.getApplication().runReadAction {
             val userPath = "src/main/java/com/example/demo/User.java"
-            
+
             val virtualFile = myFixture.findFileInTempDir(userPath)
             assertNotNull(virtualFile, "User.java should exist in test project")
-            
+
             val psiFile = myFixture.psiManager.findFile(virtualFile)
             assertNotNull(psiFile, "Should be able to get PSI file")
-            
+
             // Test createReferenceInfo method directly
             val element = psiFile.firstChild
             if (element != null) {
                 val refInfo = finder.createReferenceInfo(element, element)
-                
+
                 assertNotNull(refInfo, "Should create reference info")
                 assertTrue(refInfo.filePath.contains("User.java"), "Should have correct file path")
                 assertNotNull(refInfo.lineNumber, "Should have line number")

@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "dev.mcp.extensions"
-version = "1.0.2"
+version = "1.0.3"
 
 repositories {
     mavenCentral()
@@ -19,49 +19,34 @@ repositories {
 // Configure IntelliJ Platform Gradle Plugin
 dependencies {
     intellijPlatform {
-        intellijIdeaCommunity("2025.1")
-        
-        // Core requirements
+        intellijIdeaCommunity("2024.3")
+
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.JUnit5)
         plugin("com.intellij.mcpServer", "1.0.30")
         
         // Language support
         bundledPlugin("com.intellij.java")
-
-        // "Pythonid" for ultimate, "PythonCore" for community. Find compatible
-        // ultimate versions at https://plugins.jetbrains.com/plugin/631
-        // community versions at https://plugins.jetbrains.com/plugin/7322
-        plugin("PythonCore:251.26927.53")
-        
-        // Also add Python plugin for tests
-        testPlugin("PythonCore:251.26927.53")
+        plugin("PythonCore:243.21565.211")
     }
 
-    // IMPORTANT: Use compileOnly for kotlinx-serialization to avoid class loader conflicts
-    // The MCP Server plugin already provides this dependency at runtime
-    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    
-    // For tests, we need the actual implementation
-    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
-    // Test dependencies
+    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     testImplementation(kotlin("test"))
-    // NOTE: JUnit4 is required due to IntelliJ Platform's JUnit5TestSessionListener implementation
-    // This is a known issue where IntelliJ's JUnit5 support depends on junit.framework.TestCase
     testImplementation("junit:junit:4.13.2")
 }
 
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "251"
-            untilBuild = "251.*"  // Target 2025.1 specifically
+            sinceBuild = "243"
+            untilBuild = "251.*"  // Exclude 2025.2 EAP (252.*) and later
         }
 
         changeNotes = """
-            v1.0.2:
-            - Target 2025.1+
+            v1.0.3:
+            - Improve plugin compatibility
             
             v1.0.0:
             - Initial release
@@ -72,11 +57,8 @@ intellijPlatform {
 
     pluginVerification {
         ides {
-            // Verify against 2025.1 versions only
-            ide("IC-2025.1")  // IntelliJ Community 2025.1
-            ide("IU-2025.1")  // IntelliJ Ultimate 2025.1 (with optional Python plugin)
-            ide("PC-2025.1")  // PyCharm Community 2025.1 (Python support)
-            ide("PY-2025.1")  // PyCharm Professional 2025.1 (Python support)
+            ide("IC-2024.3")
+            ide("PC-2024.3")
         }
     }
 }

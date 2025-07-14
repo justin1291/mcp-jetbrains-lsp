@@ -4,7 +4,7 @@ import com.intellij.testFramework.fixtures.CodeInsightTestFixture
 import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.TestInstance
 import java.io.File
 import kotlin.test.assertNotNull
@@ -22,7 +22,7 @@ abstract class JavaBaseTest {
         prettyPrint = true
     }
 
-    @BeforeEach
+    @BeforeAll
     open fun setUp() {
         val factory = IdeaTestFixtureFactory.getFixtureFactory()
 

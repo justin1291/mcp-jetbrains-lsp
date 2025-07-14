@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.python
 
-import com.intellij.openapi.components.Service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
@@ -29,10 +28,11 @@ import dev.mcp.extensions.lsp.core.utils.PsiUtils
  * 
  * Provides intelligent grouping and insights about usage patterns.
  * 
+ * Registered as a service in mcp-lsp-python.xml when Python module is available.
+ * 
  * Note: Uses some experimental Python PSI APIs which may change in future IntelliJ versions.
  * The @ApiStatus.Experimental warnings are expected and acceptable for this implementation.
  */
-@Service
 class PythonReferenceFinder : PythonBaseHandler(), ReferenceFinder {
     
     override fun findReferences(project: Project, element: PsiElement, args: FindReferencesArgs): List<ReferenceInfo> {

@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.python
 
-import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
@@ -16,9 +15,8 @@ import dev.mcp.extensions.lsp.core.models.DefinitionLocation
 /**
  * Definition finder implementation for Python language.
  * 
- * This is a light service - automatically registered when Python module is available.
+ * Registered as a service in mcp-lsp-python.xml when Python module is available.
  */
-@Service
 class PythonDefinitionFinder : PythonBaseHandler(), DefinitionFinder {
     
     override fun findDefinitionByPosition(psiFile: PsiFile, position: Int): List<DefinitionLocation> {

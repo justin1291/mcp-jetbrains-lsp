@@ -1,6 +1,5 @@
 package dev.mcp.extensions.lsp.languages.java
 
-import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.psi.*
@@ -20,9 +19,8 @@ import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 /**
  * Reference finder implementation for Java and Kotlin languages.
  * 
- * This is a light service - automatically registered when Java module is available.
+ * Registered as a service in mcp-lsp-java.xml when Java module is available.
  */
-@Service
 class JavaReferenceFinder : BaseLanguageHandler(), ReferenceFinder {
     
     override fun findReferences(project: Project, element: PsiElement, args: FindReferencesArgs): List<ReferenceInfo> {

@@ -4,22 +4,15 @@ import com.intellij.openapi.application.ApplicationManager
 import dev.mcp.extensions.lsp.JavaBaseTest
 import dev.mcp.extensions.lsp.core.models.DefinitionLocation
 import dev.mcp.extensions.lsp.core.models.FindDefinitionArgs
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.*
 
 @Disabled
 class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
-    
-    private lateinit var tool: FindSymbolDefinitionTool
-    
-    @BeforeEach
-    override fun setUp() {
-        super.setUp()
-        tool = FindSymbolDefinitionTool()
-    }
 
+    private val tool: FindSymbolDefinitionTool = FindSymbolDefinitionTool()
+    
     @Test
     fun testFindClassDefinitionWithProjectFile() {
         ApplicationManager.getApplication().runReadAction {
@@ -29,20 +22,22 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
                 filePath = null,
                 position = null
             )
-            
+
             val response = tool.handle(project, args)
             assertNotNull(response, "Tool should return a response")
             assertNull(response.error, "Tool should not return an error: ${response.error}")
             assertNotNull(response.status, "Tool should return status content")
-            
+
             val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
             assertTrue(definitions.isNotEmpty(), "Should find at least one definition for UserService")
-            
+
             val userServiceDef = definitions.find { it.name == "UserService" }
             assertNotNull(userServiceDef, "Should find UserService class")
             assertEquals("class", userServiceDef.type, "Should be a class")
-            assertTrue(userServiceDef.filePath.contains("UserService.java"), 
-                "Should point to UserService.java")
+            assertTrue(
+                userServiceDef.filePath.contains("UserService.java"),
+                "Should point to UserService.java"
+            )
         }
     }
 
@@ -54,22 +49,24 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = "src/main/java/com/example/demo/UserService.java",
             position = 800 // Approximate position of addUser method
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("Tool error: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isNotEmpty()) {
             val definition = definitions[0]
             assertEquals("method", definition.type, "Should find a method definition")
-            assertTrue(definition.filePath.contains("UserService.java"), 
-                "Should be in UserService.java")
+            assertTrue(
+                definition.filePath.contains("UserService.java"),
+                "Should be in UserService.java"
+            )
         } else {
             println("Position-based search found no definitions - may need to adjust position")
         }
@@ -82,29 +79,33 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: DEFAULT_ROLE field not found through global search")
             return
         }
-        
+
         val defaultRoleField = definitions.find { it.name == "DEFAULT_ROLE" }
         assertNotNull(defaultRoleField, "Should find DEFAULT_ROLE constant")
         assertEquals("field", defaultRoleField?.type, "Should be a field")
-        assertTrue(defaultRoleField?.modifiers?.contains("static") ?: false,
-            "Should be static")
-        assertTrue(defaultRoleField?.modifiers?.contains("final") ?: false,
-            "Should be final")
+        assertTrue(
+            defaultRoleField?.modifiers?.contains("static") ?: false,
+            "Should be static"
+        )
+        assertTrue(
+            defaultRoleField?.modifiers?.contains("final") ?: false,
+            "Should be final"
+        )
     }
 
     @Test
@@ -114,26 +115,26 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: User class not found through global search")
             return
         }
-        
+
         // Should find both class and constructor(s)
         val userClass = definitions.find { it.name == "User" && it.type == "class" }
         assertNotNull(userClass, "Should find User class")
-        
+
         val userConstructor = definitions.find { it.name == "User" && it.type == "constructor" }
         if (userConstructor != null) {
             assertEquals("constructor", userConstructor.type, "Should be a constructor")
@@ -147,26 +148,28 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: createUser method not found through global search")
             return
         }
-        
+
         val createUserMethod = definitions.find { it.name == "createUser" && it.type == "method" }
         assertNotNull(createUserMethod, "Should find createUser method")
-        assertTrue(createUserMethod?.containingClass?.contains("ApiController") ?: false,
-            "Should be in ApiController class")
+        assertTrue(
+            createUserMethod?.containingClass?.contains("ApiController") ?: false,
+            "Should be in ApiController class"
+        )
     }
 
     @Test
@@ -177,27 +180,29 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: DataProcessor class not found through global search")
             return
         }
-        
+
         val dataProcessorDef = definitions.find { it.name == "DataProcessor" }
         assertNotNull(dataProcessorDef, "Should find DataProcessor class")
         assertEquals("class", dataProcessorDef?.type, "Should be a class")
-        assertTrue(dataProcessorDef?.filePath?.contains("DataProcessor.java") ?: false,
-            "Should point to DataProcessor.java")
+        assertTrue(
+            dataProcessorDef?.filePath?.contains("DataProcessor.java") ?: false,
+            "Should point to DataProcessor.java"
+        )
     }
 
     @Test
@@ -207,26 +212,28 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: processData method not found through global search")
             return
         }
-        
+
         val processDataMethod = definitions.find { it.name == "processData" && it.type == "method" }
         assertNotNull(processDataMethod, "Should find processData method")
-        assertTrue(processDataMethod?.containingClass?.contains("DataProcessor") ?: false,
-            "Should be in DataProcessor class")
+        assertTrue(
+            processDataMethod?.containingClass?.contains("DataProcessor") ?: false,
+            "Should be in DataProcessor class"
+        )
     }
 
     @Test
@@ -236,27 +243,29 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: ApiResponse class not found through global search")
             return
         }
-        
+
         val apiResponseClass = definitions.find { it.name == "ApiResponse" }
         assertNotNull(apiResponseClass, "Should find ApiResponse class")
         assertEquals("class", apiResponseClass?.type, "Should be a class")
-        assertTrue(apiResponseClass?.filePath?.contains("ApiController.java") ?: false,
-            "Should be defined in ApiController.java")
+        assertTrue(
+            apiResponseClass?.filePath?.contains("ApiController.java") ?: false,
+            "Should be defined in ApiController.java"
+        )
     }
 
     @Test
@@ -266,26 +275,28 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: UserEvent enum not found through global search")
             return
         }
-        
+
         val userEventEnum = definitions.find { it.name == "UserEvent" }
         assertNotNull(userEventEnum, "Should find UserEvent enum")
-        assertTrue(userEventEnum?.type == "enum" || userEventEnum?.type == "class",
-            "Should be an enum or class")
+        assertTrue(
+            userEventEnum?.type == "enum" || userEventEnum?.type == "class",
+            "Should be an enum or class"
+        )
     }
 
     @Test
@@ -295,11 +306,11 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
         assertNull(response.error, "Should not have error for not found")
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
         assertTrue(definitions.isEmpty(), "Should return empty list for not found symbol")
     }
@@ -312,26 +323,26 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: User class not found through global search")
             return
         }
-        
+
         // Should find class definition
         val userClass = definitions.find { it.name == "User" && it.type == "class" }
         assertNotNull(userClass, "Should find User class")
-        
+
         // May also find constructors
         val constructors = definitions.filter { it.name == "User" && it.type == "constructor" }
         if (constructors.isNotEmpty()) {
@@ -346,33 +357,35 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: User class not found through global search")
             return
         }
-        
+
         // Check that all definitions have confidence scores
         definitions.forEach { def ->
-            assertTrue(def.confidence >= 0.0f && def.confidence <= 1.0f,
-                "Confidence should be between 0 and 1")
+            assertTrue(
+                def.confidence >= 0.0f && def.confidence <= 1.0f,
+                "Confidence should be between 0 and 1"
+            )
         }
-        
+
         // Results should be sorted by confidence (highest first)
         if (definitions.size > 1) {
             for (i in 1 until definitions.size) {
                 assertTrue(
-                    definitions[i-1].confidence >= definitions[i].confidence,
+                    definitions[i - 1].confidence >= definitions[i].confidence,
                     "Results should be sorted by confidence descending"
                 )
             }
@@ -386,22 +399,22 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: addUser method not found through global search")
             return
         }
-        
+
         // Check that methods have disambiguation hints
         val methodDef = definitions.find { it.type == "method" }
         if (methodDef != null) {
@@ -421,22 +434,22 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: UserService not found through global search")
             return
         }
-        
+
         // Check that isTestCode field is populated
         definitions.forEach { def ->
             assertNotNull(def.isTestCode, "Should have isTestCode field")
@@ -453,17 +466,17 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         // JDK classes might not be found in tests, but if found, should be marked as library code
         if (definitions.isNotEmpty()) {
             val stringClass = definitions.find { it.name == "String" && it.type == "class" }
@@ -480,22 +493,22 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: users field not found through global search")
             return
         }
-        
+
         // Check accessibility warning for private field
         val usersField = definitions.find { it.name == "users" && it.type == "field" }
         if (usersField != null && usersField.modifiers.contains("private")) {
@@ -515,17 +528,17 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isNotEmpty()) {
             val addUserMethod = definitions.find { it.name == "addUser" }
             assertNotNull(addUserMethod, "Should find addUser method with qualified search")
@@ -540,22 +553,22 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = null,
             position = null
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("PSI indexing limitation in test: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isEmpty()) {
             println("PSI indexing limitation: isValidUser method not found through global search")
             return
         }
-        
+
         val staticMethod = definitions.find { it.name == "isValidUser" && it.modifiers.contains("static") }
         if (staticMethod != null) {
             assertNotNull(staticMethod.disambiguationHint, "Static method should have disambiguation hint")
@@ -574,17 +587,17 @@ class FindSymbolDefinitionToolTestJava : JavaBaseTest() {
             filePath = "src/main/java/com/example/demo/UserService.java",
             position = 800 // Approximate position
         )
-        
+
         val response = tool.handle(project, args)
         assertNotNull(response)
-        
+
         if (response.error != null) {
             println("Tool error: ${response.error}")
             return
         }
-        
+
         val definitions: List<DefinitionLocation> = parseJsonResponse(response.status)
-        
+
         if (definitions.isNotEmpty()) {
             val definition = definitions[0]
             assertTrue(
