@@ -1,16 +1,18 @@
 package dev.mcp.extensions.lsp.tools
 
-import dev.mcp.extensions.lsp.BaseTest
+import dev.mcp.extensions.lsp.JavaBaseTest
 import dev.mcp.extensions.lsp.core.models.FindReferencesArgs
 import dev.mcp.extensions.lsp.core.models.GroupedReferencesResult
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class FindSymbolReferencesToolTest : BaseTest() {
+@Disabled("Migrated to JavaReferenceFinderTest - testing JavaReferenceFinder directly instead of through tool layer")
+class FindSymbolReferencesToolTestJava : JavaBaseTest() {
     
     private lateinit var tool: FindSymbolReferencesTool
     

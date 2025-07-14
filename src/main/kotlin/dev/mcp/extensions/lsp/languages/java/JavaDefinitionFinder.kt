@@ -1,7 +1,7 @@
 package dev.mcp.extensions.lsp.languages.java
 
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiShortNamesCache
@@ -12,7 +12,10 @@ import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 
 /**
  * Definition finder implementation for Java and Kotlin languages.
+ * 
+ * This is a light service - automatically registered when Java module is available.
  */
+@Service
 class JavaDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
     
     override fun findDefinitionByPosition(psiFile: PsiFile, position: Int): List<DefinitionLocation> {

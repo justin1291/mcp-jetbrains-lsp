@@ -3,6 +3,7 @@ plugins {
     kotlin("jvm") version "2.1.0"
     id("org.jetbrains.intellij.platform") version "2.6.0"
     kotlin("plugin.serialization") version "2.1.0"
+    kotlin("plugin.power-assert") version "2.1.0"
 }
 
 group = "dev.mcp.extensions"
@@ -16,14 +17,25 @@ repositories {
 }
 
 // Configure IntelliJ Platform Gradle Plugin
-// Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     intellijPlatform {
-        create("IC", "2024.3")
+        intellijIdeaCommunity("2025.1")
+        
+        // Core requirements
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.JUnit5)
         plugin("com.intellij.mcpServer", "1.0.30")
+        
+        // Language support
         bundledPlugin("com.intellij.java")
+
+        // "Pythonid" for ultimate, "PythonCore" for community. Find compatible
+        // ultimate versions at https://plugins.jetbrains.com/plugin/631
+        // community versions at https://plugins.jetbrains.com/plugin/7322
+        plugin("PythonCore:251.26927.53")
+        
+        // Also add Python plugin for tests
+        testPlugin("PythonCore:251.26927.53")
     }
 
     // IMPORTANT: Use compileOnly for kotlinx-serialization to avoid class loader conflicts
@@ -43,22 +55,28 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "243"
+            sinceBuild = "251"
+            untilBuild = "251.*"  // Target 2025.1 specifically
         }
 
         changeNotes = """
-            Initial release of MCP Language Service Extension:
-            - Extract symbols from files
-            - Find symbol definitions
-            - Find symbol references
-            - Get hover information
+            v1.0.2:
+            - Target 2025.1+
+            
+            v1.0.0:
+            - Initial release
+            - Java/Kotlin support
+            - Alpha Python support 
         """.trimIndent()
     }
 
     pluginVerification {
         ides {
-            ide("IC-2024.3")
-            ide("IC-2025.1")
+            // Verify against 2025.1 versions only
+            ide("IC-2025.1")  // IntelliJ Community 2025.1
+            ide("IU-2025.1")  // IntelliJ Ultimate 2025.1 (with optional Python plugin)
+            ide("PC-2025.1")  // PyCharm Community 2025.1 (Python support)
+            ide("PY-2025.1")  // PyCharm Professional 2025.1 (Python support)
         }
     }
 }
@@ -81,6 +99,7 @@ tasks {
         testLogging {
             events("passed", "skipped", "failed")
             showStandardStreams = true
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         }
     }
 }
@@ -89,4 +108,16 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
+}
+
+// Configure Power Assert
+powerAssert {
+    functions = listOf(
+        "kotlin.assert",
+        "kotlin.test.assertTrue", 
+        "kotlin.test.assertFalse",
+        "kotlin.test.assertEquals",
+        "kotlin.test.assertNotNull",
+        "kotlin.test.assertNull"
+    )
 }

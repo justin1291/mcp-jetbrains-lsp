@@ -7,6 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Service class for managing users.
  * This class demonstrates various Java features for testing symbol extraction.
+ * @since 1.0
+ * @see DataProcessor
  */
 @SuppressWarnings("unused")
 public class UserService {

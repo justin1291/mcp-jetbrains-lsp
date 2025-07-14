@@ -46,8 +46,15 @@
 
 
     <depends>com.intellij.modules.platform</depends>
-    <depends>com.intellij.modules.java</depends>
     <depends>com.intellij.mcpServer</depends>
+
+    <depends config-file="mcp-lsp-java.xml">com.intellij.modules.java</depends>
+    <depends config-file="mcp-lsp-python.xml">com.intellij.modules.python</depends>
+    
+    <!-- Future language support
+    <depends optional="true" config-file="mcp-lsp-javascript.xml">com.intellij.modules.javascript</depends>
+    <depends optional="true" config-file="mcp-lsp-go.xml">com.intellij.modules.go</depends>
+    -->
 
     <extensions defaultExtensionNs="com.intellij.mcpServer">
         <mcpTool implementation="dev.mcp.extensions.lsp.tools.GetSymbolsInFileTool"/>

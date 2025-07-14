@@ -1,0 +1,8 @@
+<idea-plugin>
+    <!-- Python language support configuration -->
+    <!-- This file is only loaded when com.intellij.modules.python is available -->
+    
+    <!-- Services are now light services with @Service annotation - no XML registration needed! -->
+    
+    <!-- Future: Add any Python-specific extensions here if needed -->
+</idea-plugin>

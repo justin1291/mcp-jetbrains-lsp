@@ -1,17 +1,19 @@
 package dev.mcp.extensions.lsp.core.factories
 
 import com.intellij.lang.Language
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiFile
 import dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor
 import dev.mcp.extensions.lsp.languages.java.JavaSymbolExtractor
+import dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor
 
 /**
  * Factory for creating language-specific symbol extractors.
+ * Uses IntelliJ's service mechanism to load only available implementations.
  */
 object SymbolExtractorFactory {
     private val logger = Logger.getInstance(SymbolExtractorFactory::class.java)
-    private val extractorCache = mutableMapOf<String, SymbolExtractor>()
     
     /**
      * Get the appropriate symbol extractor for a given file.
@@ -28,24 +30,54 @@ object SymbolExtractorFactory {
         logger.info("Determining symbol extractor for language: $languageId ($languageName)")
         logger.debug("File: ${psiFile.virtualFile?.path}")
         
-        return when {
+        // Try to get language-specific service
+        val extractor = when {
             isJavaOrKotlin(language) -> {
-                logger.debug("Using Java/Kotlin symbol extractor")
-                extractorCache.getOrPut("java") { JavaSymbolExtractor() }
+                logger.debug("Looking for Java/Kotlin symbol extractor service")
+                try {
+                    service<JavaSymbolExtractor>()
+                } catch (e: Exception) {
+                    logger.debug("Java symbol extractor service not available: ${e.message}")
+                    null
+                }
             }
             isPython(language) -> {
-                logger.debug("Python language detected")
-                throw UnsupportedOperationException("Python support not yet implemented")
+                logger.debug("Looking for Python symbol extractor service")
+                try {
+                    service<PythonSymbolExtractor>()
+                } catch (e: Exception) {
+                    logger.debug("Python symbol extractor service not available: ${e.message}")
+                    null
+                }
+            }
+            else -> null
+        }
+        
+        if (extractor != null) {
+            logger.info("Found symbol extractor for $languageName")
+            return extractor
+        }
+        
+        // Provide helpful error message based on language
+        val errorMessage = when {
+            isPython(language) -> {
+                "Python support is not available in this IDE. " +
+                "Python is supported in PyCharm or IntelliJ IDEA Ultimate with the Python plugin installed."
+            }
+            isJavaOrKotlin(language) -> {
+                "Java/Kotlin support should be available but the service failed to load. " +
+                "Please restart the IDE or reinstall the plugin."
             }
             isJavaScriptOrTypeScript(language) -> {
-                logger.debug("JavaScript/TypeScript language detected")
-                throw UnsupportedOperationException("JavaScript/TypeScript support not yet implemented")
+                "JavaScript/TypeScript support is not yet implemented."
             }
             else -> {
-                logger.warn("Unsupported language: $languageId")
-                throw UnsupportedOperationException("Language not supported: $languageName (id: $languageId)")
+                "Language not supported: $languageName (id: $languageId)"
             }
         }
+        
+        logger.warn("No symbol extractor available: $errorMessage")
+        throw UnsupportedOperationException(errorMessage)
     }
     
     /**
@@ -75,19 +107,53 @@ object SymbolExtractorFactory {
     }
     
     /**
-     * Get list of supported languages.
+     * Get list of supported languages based on available services.
      */
     fun getSupportedLanguages(): List<String> {
-        return listOf(
-            "Java",
-            "Kotlin"
-        )
+        val languages = mutableListOf<String>()
+        
+        // Check if Java service is available
+        try {
+            service<JavaSymbolExtractor>()
+            languages.add("Java")
+            languages.add("Kotlin")
+        } catch (e: Exception) {
+            // Java not available
+        }
+        
+        // Check if Python service is available
+        try {
+            service<PythonSymbolExtractor>()
+            languages.add("Python")
+        } catch (e: Exception) {
+            // Python not available
+        }
+        
+        return languages
     }
     
     /**
      * Check if a language is supported.
      */
     fun isLanguageSupported(language: Language): Boolean {
-        return isJavaOrKotlin(language)
+        return when {
+            isJavaOrKotlin(language) -> {
+                try {
+                    service<JavaSymbolExtractor>()
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            isPython(language) -> {
+                try {
+                    service<PythonSymbolExtractor>()
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            else -> false
+        }
     }
 }

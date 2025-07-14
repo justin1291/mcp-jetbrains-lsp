@@ -27,6 +27,11 @@ The plugin follows a modular, extensible architecture that separates concerns an
     factories                implementation
 ```
 
+### Key Issues
+Unable to make python optional at the moment.
+Tests that rely on indexing are not currently working. Will investigate different strategies for testing in the future.
+
+
 ### Key Components
 
 1. **MCP Tools** (`src/main/kotlin/dev/mcp/extensions/lsp/tools/`)
@@ -48,58 +53,6 @@ The plugin follows a modular, extensible architecture that separates concerns an
    - Extend BaseLanguageHandler for common functionality
    - Currently supports Java/Kotlin
 
-### Adding New Language Support
-
-Adding support for a new language (e.g., Python) is straightforward:
-
-1. **Create Implementations**:
-   ```kotlin
-   // In src/main/kotlin/dev/mcp/extensions/lsp/languages/python/
-   class PythonSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
-       override fun extractSymbolsFlat(file: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
-           // Python-specific symbol extraction logic
-       }
-   }
-   ```
-
-2. **Update Factories**:
-   ```kotlin
-   // In SymbolExtractorFactory.kt
-   fun getExtractor(element: PsiElement): SymbolExtractor {
-       return when {
-           isJava(element.language) -> javaExtractor
-           isPython(element.language) -> pythonExtractor  // Add this
-           else -> throw UnsupportedOperationException(...)
-       }
-   }
-   ```
-
-3. **Add Plugin Dependency**:
-   ```xml
-   <!-- In plugin.xml -->
-   <depends optional="true">com.intellij.modules.python</depends>
-   ```
-
-That's it! No changes to MCP tools are needed.
-
-## Using with Claude Code
-
-### Quick Setup
-1. Install this plugin in IntelliJ IDEA (see Installation below)
-2. Add to your Claude Code MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "intellij": {
-      "command": "intellij-mcp-server",
-      "args": ["--port", "9999"]
-    }
-  }
-}
-```
-
-3. Restart Claude Code and open your IntelliJ project
 
 ### Example: Refactoring a Method Safely
 
@@ -156,6 +109,18 @@ cd mcp-idea-lsp
 - IntelliJ IDEA 2024.3 or later
 - [MCP Server Plugin](https://plugins.jetbrains.com/plugin/12345-mcp-server) v1.0.30+
 - Java 21 or later
+
+## Documentation
+
+### Language Feature Documentation
+Detailed documentation about language-specific features and implementation considerations can be found in the `docs/language-features/` directory:
+
+- **[Java Features](docs/language-features/java-features.md)** - Java and Kotlin language specifics
+- **[Python Features](docs/language-features/python-features.md)** - Python language specifics (for ongoing implementation)
+- **[JavaScript Features](docs/language-features/javascript-features.md)** - JavaScript/TypeScript specifics (planned)
+- **[API Design Considerations](docs/language-features/api-design-considerations.md)** - Cross-language insights and future API improvements
+
+This documentation helps guide implementation decisions and ensures we properly handle each language's unique features.
 
 ## MCP Tools API Reference
 
@@ -350,6 +315,12 @@ git commit -m "feat!: change API response format"
 │   │   │   └── java/            # Java/Kotlin implementations
 │   │   └── tools/               # MCP protocol handlers
 │   └── test/kotlin/             # Test suite
+├── docs/
+│   └── language-features/       # Language-specific documentation
+│       ├── java-features.md     # Java/Kotlin language specifics
+│       ├── python-features.md   # Python language specifics
+│       ├── javascript-features.md # JS/TS language specifics
+│       └── api-design-considerations.md # Cross-language insights
 ├── build.gradle.kts             # Build configuration
 └── .github/workflows/           # CI/CD pipeline
 ```
@@ -428,12 +399,6 @@ tasks {
 
 ## Roadmap
 
-### Phase 2: Python Support (Next)
-- **Python Symbol Extraction**: Classes, functions, methods, variables, decorators
-- **Python Definition Finding**: Navigate to definitions across modules
-- **Python Reference Finding**: Find usages with context (imports, calls, inheritance)
-- **Python Hover Info**: Type hints, docstrings, function signatures
-
 ### Phase 3: JavaScript/TypeScript Support
 - **JS/TS Symbol Extraction**: Classes, functions, React components, exports
 - **JS/TS Definition Finding**: Navigate through modules and node_modules
@@ -456,47 +421,6 @@ Thanks to our modular architecture, adding a new language is straightforward:
 2. **Update 4 factories** to recognize your language
 3. **Add plugin dependency** in plugin.xml
 4. That's it! No changes to MCP tools needed
-
-### Example: Adding Python Support
-
-#### 1. Create Python Implementations
-```kotlin
-// src/main/kotlin/dev/mcp/extensions/lsp/languages/python/PythonSymbolExtractor.kt
-class PythonSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
-    override fun extractSymbolsFlat(file: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
-        val symbols = mutableListOf<SymbolInfo>()
-        file.accept(object : PyRecursiveElementVisitor() {
-            override fun visitPyClass(node: PyClass) {
-                symbols.add(createClassSymbol(node))
-                super.visitPyClass(node)
-            }
-            override fun visitPyFunction(node: PyFunction) {
-                symbols.add(createFunctionSymbol(node))
-                super.visitPyFunction(node)
-            }
-        })
-        return symbols
-    }
-}
-```
-
-#### 2. Update Factories
-```kotlin
-// In SymbolExtractorFactory.kt
-fun getExtractor(element: PsiElement): SymbolExtractor {
-    return when {
-        isJava(element.language) -> JavaSymbolExtractor()
-        isPython(element.language) -> PythonSymbolExtractor()  // Add this
-        else -> throw UnsupportedOperationException(...)
-    }
-}
-```
-
-#### 3. Add Plugin Dependency
-```xml
-<!-- In plugin.xml -->
-<depends optional="true">com.intellij.modules.python</depends>
-```
 
 ### Language-Specific Considerations
 - **Dynamic Languages**: Handle missing type information gracefully

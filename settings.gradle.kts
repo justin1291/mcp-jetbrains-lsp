@@ -1,3 +1,3 @@
 rootProject.name = "mcp-idea-lsp"
 
-include("demo-project")
+include("java-demo-project")
