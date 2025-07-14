@@ -19,15 +19,14 @@ repositories {
 // Configure IntelliJ Platform Gradle Plugin
 dependencies {
     intellijPlatform {
-        intellijIdeaCommunity("2024.3")
-
+        intellijIdeaCommunity("2025.1")
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.JUnit5)
         plugin("com.intellij.mcpServer", "1.0.30")
         
         // Language support
         bundledPlugin("com.intellij.java")
-        plugin("PythonCore:243.21565.211")
+        plugin("PythonCore:251.26927.53")
     }
 
 
@@ -40,7 +39,7 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "243"
+            sinceBuild = "251"
             untilBuild = "251.*"  // Exclude 2025.2 EAP (252.*) and later
         }
 
@@ -58,7 +57,6 @@ intellijPlatform {
     pluginVerification {
         ides {
             ide("IC-2024.3")
-            ide("PC-2024.3")
         }
     }
 }

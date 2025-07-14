@@ -1,16 +1,16 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
-<idea-plugin>
+<idea-plugin require-restart="false">
 
-    <id>dev.mcp.extensions.lsp</id>
-    <name>MCP Language Service Tools</name>
+  <id>dev.mcp.extensions.lsp</id>
+  <name>MCP Language Service Tools</name>
 
-    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://github.com/justin1291">Justin Gooley</vendor>
+  <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
+  <vendor url="https://github.com/justin1291">Justin Gooley</vendor>
 
-    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
-         Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
-         Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
-    <description><![CDATA[
+  <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
+       Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
+       Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
+  <description><![CDATA[
     Advanced language service tools for the JetBrains MCP Server, providing IDE-level code intelligence to AI assistants.
     
     <h3>🚀 Multi-Language Architecture</h3>
@@ -45,21 +45,16 @@
   ]]></description>
 
 
-    <depends>com.intellij.modules.platform</depends>
-    <depends>com.intellij.mcpServer</depends>
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.mcpServer</depends>
 
-    <depends config-file="mcp-lsp-java.xml">com.intellij.modules.java</depends>
-    <depends config-file="mcp-lsp-python.xml">com.intellij.modules.python</depends>
-    
-    <!-- Future language support
-    <depends optional="true" config-file="mcp-lsp-javascript.xml">com.intellij.modules.javascript</depends>
-    <depends optional="true" config-file="mcp-lsp-go.xml">com.intellij.modules.go</depends>
-    -->
+  <depends config-file="mcp-lsp-java.xml">com.intellij.modules.java</depends>
+  <depends optional="true" config-file="mcp-lsp-python.xml">com.intellij.modules.python</depends>
 
-    <extensions defaultExtensionNs="com.intellij.mcpServer">
-        <mcpTool implementation="dev.mcp.extensions.lsp.tools.GetSymbolsInFileTool"/>
-        <mcpTool implementation="dev.mcp.extensions.lsp.tools.FindSymbolDefinitionTool"/>
-        <mcpTool implementation="dev.mcp.extensions.lsp.tools.FindSymbolReferencesTool"/>
-        <mcpTool implementation="dev.mcp.extensions.lsp.tools.GetHoverInfoTool"/>
-    </extensions>
+  <extensions defaultExtensionNs="com.intellij.mcpServer">
+    <mcpTool implementation="dev.mcp.extensions.lsp.tools.GetSymbolsInFileTool"/>
+    <mcpTool implementation="dev.mcp.extensions.lsp.tools.FindSymbolDefinitionTool"/>
+    <mcpTool implementation="dev.mcp.extensions.lsp.tools.FindSymbolReferencesTool"/>
+    <mcpTool implementation="dev.mcp.extensions.lsp.tools.GetHoverInfoTool"/>
+  </extensions>
 </idea-plugin>
