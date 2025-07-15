@@ -44,7 +44,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            v1.0.3: Add logo
+            v1.0.4: Add logo
         """.trimIndent()
     }
 
