@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "dev.mcp.extensions"
-version = "1.0.3"
+version = "1.0.4"
 
 repositories {
     mavenCentral()
@@ -44,13 +44,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            v1.0.3:
-            - Improve plugin compatibility
-            
-            v1.0.0:
-            - Initial release
-            - Java/Kotlin support
-            - Alpha Python support 
+            v1.0.4: Add logo
         """.trimIndent()
     }
 

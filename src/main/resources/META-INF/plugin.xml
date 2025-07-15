@@ -4,18 +4,15 @@
   <id>dev.mcp.extensions.lsp</id>
   <name>MCP Language Service Tools</name>
 
-  <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
+
   <vendor url="https://github.com/justin1291">Justin Gooley</vendor>
 
-  <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
-       Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
-       Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
   <description><![CDATA[
     Advanced language service tools for the JetBrains MCP Server, providing IDE-level code intelligence to AI assistants.
     
     <h3>🚀 Multi-Language Architecture</h3>
-    <p>Built with an extensible architecture that makes adding new language support trivial. Currently supports Java and Kotlin,
-    with a clear path for adding Python, JavaScript, Go, and more.</p>
+    <p>Built with an extensible architecture that makes adding new language support trivial. Currently supports JVM languages. Python support is in alpha, with more languages planned.</p>
+    </p>
     
     <h3>✨ Key Features</h3>
     <ul>
