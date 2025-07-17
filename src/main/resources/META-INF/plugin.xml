@@ -11,7 +11,14 @@
     Advanced language service tools for the JetBrains MCP Server, providing IDE-level code intelligence to AI assistants.
     
     <h3>🚀 Multi-Language Architecture</h3>
-    <p>Built with an extensible architecture that makes adding new language support trivial. Currently supports JVM languages. Python support is in alpha, with more languages planned.</p>
+    <p>Built with an extensible architecture that makes adding new language support trivial</p>
+    <h3>🌐 Supported Languages</h3>
+    <ul>
+      <li><b>Java</b></li>
+      <li><b>Kotlin</b></li>
+      <li><b>Python</b></li>
+      <li><b>JavaScript/TypeScript</b> - includes some basic react/vue/angular knowledge</li>
+    </ul>
     </p>
     
     <h3>✨ Key Features</h3>
