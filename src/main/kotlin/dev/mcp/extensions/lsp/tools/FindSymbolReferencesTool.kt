@@ -23,28 +23,30 @@ class FindSymbolReferencesTool : AbstractMcpTool<FindReferencesArgs>(FindReferen
     private val logger = Logger.getInstance(FindSymbolReferencesTool::class.java)
 
     override val name: String = "find_symbol_references"
-    override val description: String = """
-        Find all usages of symbol. Returns grouped results with insights.
-        
-        Use when: need impact analysis, find callers, refactoring prep, usage patterns
-        
-        Returns:
-        - Grouped by usage type (method_call, field_read, field_write, etc)
-        - Insights: "Primary usage in UserController (15 calls)", "No test usage - add tests", "3 deprecated usages"
-        - Data flow context: "passed as argument", "returned from method", "used in condition"
-        - Each ref has: location, usage type, test/deprecated flags, surrounding code
-        
-        Usage types: method_call, static_method_call, getter_call, setter_call, field_read, field_write, field_increment, constructor_call, type_reference, method_override
-        
-        Params:
-        - symbolName: name to find
-        - filePath + position: find at specific location
-        - includeDeclaration: include original declaration
-        
-        Supported languages: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}
-        
-        Offsets included for precise edits. Better than basic find-usages: categorizes, provides insights, shows data flow.
-    """.trimIndent()
+    override val description: String = """Find all usages of symbol. Returns grouped results with insights.
+
+Use when: need impact analysis, find callers, refactoring prep, usage patterns
+
+Returns:
+- Grouped by usage type (method_call, field_read, field_write, etc)
+- Insights: "Primary usage in UserController (15 calls)", "No test usage - add tests", "3 deprecated usages"
+- Data flow context: "passed as argument", "returned from method", "used in condition"
+- Each ref has: location, usage type, test/deprecated flags, surrounding code
+
+Usage types: method_call, static_method_call, getter_call, setter_call, field_read, field_write, field_increment, constructor_call, type_reference, method_override
+
+Parameter combinations
+1. Position: filePath + position (finds symbol at cursor)
+2. Name: symbolName only (project-wide search)
+3. Both: disambiguation when multiple matches
+
+Params:
+- symbolName: name to find
+- filePath (optional without position)
+- position (required with filePath): find at specific location
+- includeDeclaration (default false): include original declaration
+
+Supported languages: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}""".trimIndent()
 
     /**
      * Handles the symbol references finding request.

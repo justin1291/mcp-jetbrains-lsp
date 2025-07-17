@@ -1,0 +1,15 @@
+# Local Development Configuration
+# Copy this file to .local.properties for local development overrides
+# This file is gitignored and will never be committed
+
+# For developing with commercial IDE modules (JavaScript, Database Tools, 
+# Python Pro, etc.), set your local IDE installation path:
+
+# macOS (local installation required due to JetBrains Runtime issues):
+# localIdePath=/Applications/IntelliJ IDEA Ultimate.app
+
+# Windows/Linux:
+# localIdePath=C:/Program Files/JetBrains/IntelliJ IDEA 2025.1
+# localIdePath=/opt/idea-IU-2025.1
+
+

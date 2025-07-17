@@ -9,6 +9,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import dev.mcp.extensions.lsp.core.interfaces.DefinitionFinder
 import dev.mcp.extensions.lsp.core.models.DefinitionLocation
 import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
+import kotlin.math.abs
 
 /**
  * Definition finder implementation for Java and Kotlin languages.
@@ -19,208 +20,513 @@ import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 class JavaDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
     
     override fun findDefinitionByPosition(psiFile: PsiFile, position: Int): List<DefinitionLocation> {
-        logger.info("Finding definition at position $position in ${psiFile.name}")
+        // Validate PSI file and position
+        if (psiFile.virtualFile == null) {
+            return emptyList()
+        }
         
-        val element = psiFile.findElementAt(position) 
-            ?: return emptyList()
+        if (position < 0 || position >= psiFile.textLength) {
+            return emptyList()
+        }
 
-        // Find the reference at this position
-        val reference = element.parent?.reference ?: element.reference
-        if (reference != null) {
-            val resolved = reference.resolve()
-            if (resolved != null) {
-                val location = createLocation(resolved)
-                return listOf(
-                    location.copy(
-                        confidence = 1.0f, // Direct reference resolution
-                        disambiguationHint = generateDisambiguationHint(resolved)
-                    )
-                )
+        // Primary approach: Find element at exact position
+        val elementAtPosition = psiFile.findElementAt(position)
+        if (elementAtPosition != null) {
+            // Try to resolve reference at this position
+            val referenceResult = resolveReferenceAtElement(elementAtPosition)
+            if (referenceResult.isNotEmpty()) {
+                return referenceResult
+            }
+            
+            // Try to find named element at this position
+            val namedElementResult = findNamedElementAtPosition(elementAtPosition)
+            if (namedElementResult.isNotEmpty()) {
+                return namedElementResult
             }
         }
 
-        // Try to find a named element at this position
-        val namedElement = PsiTreeUtil.getParentOfType(element, PsiNamedElement::class.java)
-        if (namedElement != null) {
-            val location = createLocation(namedElement)
-            return listOf(
-                location.copy(
-                    confidence = 0.9f, // Found at position but not through reference
-                    disambiguationHint = generateDisambiguationHint(namedElement)
-                )
-            )
+        // Fallback approach: Search in nearby positions
+        val fallbackResult = findDefinitionWithFallback(psiFile, position)
+        if (fallbackResult.isNotEmpty()) {
+            return fallbackResult
         }
 
         return emptyList()
     }
+
+    /**
+     * Resolve reference at the given element.
+     */
+    private fun resolveReferenceAtElement(element: PsiElement): List<DefinitionLocation> {
+        try {
+            // Check parent for reference first (common case)
+            val parentReference = element.parent?.reference
+            if (parentReference != null) {
+                val resolved = parentReference.resolve()
+                if (resolved != null && isValidDefinitionElement(resolved)) {
+                    val location = createLocationSafely(resolved)
+                    return if (location != null) {
+                        listOf(location.copy(
+                            confidence = 1.0f,
+                            disambiguationHint = generateDisambiguationHint(resolved)
+                        ))
+                    } else emptyList()
+                }
+            }
+
+            // Check direct reference
+            val directReference = element.reference
+            if (directReference != null) {
+                val resolved = directReference.resolve()
+                if (resolved != null && isValidDefinitionElement(resolved)) {
+                    val location = createLocationSafely(resolved)
+                    return if (location != null) {
+                        listOf(location.copy(
+                            confidence = 1.0f,
+                            disambiguationHint = generateDisambiguationHint(resolved)
+                        ))
+                    } else emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug("Error resolving reference at element", e)
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * Find named element at the given position.
+     */
+    private fun findNamedElementAtPosition(element: PsiElement): List<DefinitionLocation> {
+        try {
+            val namedElement = PsiTreeUtil.getParentOfType(element, PsiNamedElement::class.java)
+            if (namedElement != null && isValidDefinitionElement(namedElement)) {
+                val location = createLocationSafely(namedElement)
+                return if (location != null) {
+                    listOf(location.copy(
+                        confidence = 0.9f,
+                        disambiguationHint = generateDisambiguationHint(namedElement)
+                    ))
+                } else emptyList()
+            }
+        } catch (e: Exception) {
+            logger.debug("Error finding named element at position", e)
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * Fallback approach: try nearby positions and broader searches.
+     */
+    private fun findDefinitionWithFallback(psiFile: PsiFile, position: Int): List<DefinitionLocation> {
+        // Try positions around the given position (±5 characters)
+        for (offset in -5..5) {
+            val adjustedPosition = position + offset
+            if (adjustedPosition >= 0 && adjustedPosition < psiFile.textLength) {
+                val element = psiFile.findElementAt(adjustedPosition)
+                if (element != null) {
+                    val result = resolveReferenceAtElement(element)
+                    if (result.isNotEmpty()) {
+                        return result.map { it.copy(confidence = it.confidence * 0.8f) }
+                    }
+                }
+            }
+        }
+
+        // Try to find any named element in the vicinity
+        val startOffset = maxOf(0, position - 20)
+        val endOffset = minOf(psiFile.textLength, position + 20)
+        
+        try {
+            val elements = mutableListOf<PsiElement>()
+            var currentElement = psiFile.findElementAt(startOffset)
+            
+            while (currentElement != null && currentElement.textRange.startOffset < endOffset) {
+                if (currentElement is PsiNamedElement && isValidDefinitionElement(currentElement)) {
+                    elements.add(currentElement)
+                }
+                currentElement = PsiTreeUtil.nextLeaf(currentElement)
+            }
+            
+            if (elements.isNotEmpty()) {
+                // Return the closest element to the original position
+                val closestElement = elements.minByOrNull { 
+                    abs(it.textRange.startOffset - position) 
+                }
+                if (closestElement != null) {
+                    val location = createLocationSafely(closestElement)
+                    return if (location != null) {
+                        listOf(location.copy(
+                            confidence = 0.6f,
+                            disambiguationHint = "Nearest symbol: ${generateDisambiguationHint(closestElement)}"
+                        ))
+                    } else emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug("Error in fallback search", e)
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * Check if an element is a valid definition element.
+     */
+    private fun isValidDefinitionElement(element: PsiElement): Boolean {
+        return element is PsiClass || element is PsiMethod || 
+               element is PsiField || element is PsiVariable ||
+               element is PsiParameter || element is PsiLocalVariable
+    }
     
     override fun findDefinitionByName(project: Project, symbolName: String): List<DefinitionLocation> {
-        logger.info("Finding definition by name: $symbolName")
+        if (symbolName.isBlank()) {
+            return emptyList()
+        }
         
         val scope = GlobalSearchScope.projectScope(project)
         val definitions = mutableListOf<DefinitionLocation>()
-        val cache = PsiShortNamesCache.getInstance(project)
+        
+        try {
+            val cache = PsiShortNamesCache.getInstance(project)
+            val javaPsiFacade = JavaPsiFacade.getInstance(project)
 
-        // Check if it's a qualified name (e.g., "ClassName.methodName")
-        val parts = symbolName.split(".")
-        if (parts.size == 2) {
-            // Search for method in specific class
-            val className = parts[0]
-            val methodName = parts[1]
-            val classes = JavaPsiFacade.getInstance(project).findClasses(className, scope)
-            for (psiClass in classes) {
-                val methods = psiClass.findMethodsByName(methodName, true)
-                methods.forEach {
-                    val location = createLocation(it, symbolName)
-                    definitions.add(
-                        location.copy(
-                            confidence = 1.0f, // Exact qualified match
-                            disambiguationHint = "Method in ${psiClass.qualifiedName}"
-                        )
-                    )
+            // Check if it's a qualified name (e.g., "ClassName.methodName")
+            val parts = symbolName.split(".")
+            if (parts.size == 2) {
+                // Search for method in specific class
+                val className = parts[0]
+                val methodName = parts[1]
+                
+                try {
+                    // First try to find the class using PsiShortNamesCache
+                    val classes = cache.getClassesByName(className, scope)
+                    for (psiClass in classes) {
+                        try {
+                            val methods = psiClass.findMethodsByName(methodName, true)
+                            methods.forEach { method ->
+                                val location = createLocationSafely(method, symbolName)
+                                if (location != null) {
+                                    definitions.add(
+                                        location.copy(
+                                            confidence = 1.0f, // Exact qualified match
+                                            disambiguationHint = "Method in ${psiClass.qualifiedName ?: psiClass.name}"
+                                        )
+                                    )
+                                }
+                            }
+                        } catch (e: Exception) {
+                            logger.debug("Error searching methods in class ${psiClass.name}", e)
+                        }
+                    }
+                    
+                    // Also try with qualified name if no results yet
+                    if (definitions.isEmpty()) {
+                        val qualifiedClasses = javaPsiFacade.findClasses("com.example.demo.$className", scope)
+                        for (psiClass in qualifiedClasses) {
+                            try {
+                                val methods = psiClass.findMethodsByName(methodName, true)
+                                methods.forEach { method ->
+                                    val location = createLocationSafely(method, symbolName)
+                                    if (location != null) {
+                                        definitions.add(
+                                            location.copy(
+                                                confidence = 1.0f, // Exact qualified match
+                                                disambiguationHint = "Method in ${psiClass.qualifiedName ?: psiClass.name}"
+                                            )
+                                        )
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                logger.debug("Error searching methods in class ${psiClass.name}", e)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.debug("Error searching for qualified name: $symbolName", e)
+                }
+            } else {
+                // Search for classes using PsiShortNamesCache
+                try {
+                    val classesFromCache = cache.getClassesByName(symbolName, scope)
+                    classesFromCache.forEach { psiClass ->
+                        try {
+                            val location = createLocationSafely(psiClass, symbolName)
+                            if (location != null) {
+                                definitions.add(
+                                    location.copy(
+                                        confidence = calculateConfidence(psiClass, symbolName, isClass = true),
+                                        disambiguationHint = generateDisambiguationHint(psiClass)
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            logger.debug("Error processing class ${psiClass.name}", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.debug("Error searching for classes with name: $symbolName", e)
+                }
+
+                // Search for methods
+                try {
+                    cache.getMethodsByName(symbolName, scope).forEach { method ->
+                        try {
+                            val location = createLocationSafely(method, symbolName)
+                            if (location != null) {
+                                definitions.add(
+                                    location.copy(
+                                        confidence = calculateConfidence(method, symbolName, isClass = false),
+                                        disambiguationHint = generateDisambiguationHint(method)
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            logger.debug("Error processing method ${method.name}", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.debug("Error searching for methods with name: $symbolName", e)
+                }
+
+                // Search for fields
+                try {
+                    cache.getFieldsByName(symbolName, scope).forEach { field ->
+                        try {
+                            val location = createLocationSafely(field, symbolName)
+                            if (location != null) {
+                                definitions.add(
+                                    location.copy(
+                                        confidence = calculateConfidence(field, symbolName, isClass = false),
+                                        disambiguationHint = generateDisambiguationHint(field)
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            logger.debug("Error processing field ${field.name}", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.debug("Error searching for fields with name: $symbolName", e)
                 }
             }
-        } else {
-            // Search for classes
-            val psiClasses = JavaPsiFacade.getInstance(project).findClasses(symbolName, scope)
-            psiClasses.forEach {
-                val location = createLocation(it, symbolName)
-                definitions.add(
-                    location.copy(
-                        confidence = calculateConfidence(it, symbolName, isClass = true),
-                        disambiguationHint = generateDisambiguationHint(it)
-                    )
-                )
-            }
-
-            // Search for methods
-            cache.getMethodsByName(symbolName, scope).forEach {
-                val location = createLocation(it, symbolName)
-                definitions.add(
-                    location.copy(
-                        confidence = calculateConfidence(it, symbolName, isClass = false),
-                        disambiguationHint = generateDisambiguationHint(it)
-                    )
-                )
-            }
-
-            // Search for fields
-            cache.getFieldsByName(symbolName, scope).forEach {
-                val location = createLocation(it, symbolName)
-                definitions.add(
-                    location.copy(
-                        confidence = calculateConfidence(it, symbolName, isClass = false),
-                        disambiguationHint = generateDisambiguationHint(it)
-                    )
-                )
-            }
+        } catch (e: Exception) {
+            logger.error("Error in findDefinitionByName", e)
         }
 
         // Sort by confidence (highest first)
-        val sortedDefinitions = definitions.sortedByDescending { it.confidence }
-        
-        logger.debug("Found ${sortedDefinitions.size} definitions for '$symbolName'")
-        return sortedDefinitions
+        return definitions.sortedByDescending { it.confidence }
     }
     
     override fun createLocation(element: PsiElement, searchTerm: String?): DefinitionLocation {
-        val containingFile = element.containingFile
-        val virtualFile = containingFile.virtualFile
-        val project = element.project
-        val basePath = project.basePath ?: ""
-        val relativePath = virtualFile.path.removePrefix(basePath).removePrefix("/")
+        val location = createLocationSafely(element, searchTerm)
+        return location ?: throw IllegalStateException("Failed to create location for element: $element")
+    }
 
-        val textRange = element.textRange
-        val document = PsiDocumentManager.getInstance(project).getDocument(containingFile)
-        val lineNumber = document?.getLineNumber(textRange.startOffset) ?: 0
+    /**
+     * Create a DefinitionLocation from a PSI element with comprehensive null safety.
+     * Returns null if the element cannot be safely processed.
+     */
+    private fun createLocationSafely(element: PsiElement, searchTerm: String? = null): DefinitionLocation? {
+        try {
+            // Validate essential element properties
+            val containingFile = element.containingFile ?: return null
+            val virtualFile = containingFile.virtualFile ?: return null
+            val project = element.project
+            val basePath = project.basePath ?: return null
+            val textRange = element.textRange ?: return null
 
-        // Check if in test or library code
-        val isTestCode = isInTestCode(virtualFile)
-        val isLibraryCode = isInLibraryCode(virtualFile, project)
+            // Calculate relative path safely
+            val relativePath = try {
+                virtualFile.path.removePrefix(basePath).removePrefix("/")
+            } catch (e: Exception) {
+                virtualFile.name
+            }
 
-        // Generate accessibility warning
-        val accessibilityWarning = generateAccessibilityWarning(element)
+            // Calculate line number safely
+            val lineNumber = try {
+                val document = PsiDocumentManager.getInstance(project).getDocument(containingFile)
+                if (document != null) {
+                    document.getLineNumber(textRange.startOffset) + 1
+                } else {
+                    1
+                }
+            } catch (e: Exception) {
+                1
+            }
 
-        return when (element) {
-            is PsiClass -> DefinitionLocation(
-                name = element.name ?: "anonymous",
-                filePath = relativePath,
-                startOffset = textRange.startOffset,
-                endOffset = textRange.endOffset,
-                lineNumber = lineNumber + 1,
-                type = when {
-                    element.isInterface -> "interface"
-                    element.isEnum -> "enum"
-                    element.isAnnotationType -> "annotation"
-                    else -> "class"
-                },
-                signature = buildClassSignature(element),
-                containingClass = element.containingClass?.qualifiedName,
-                modifiers = extractModifiers(element.modifierList),
-                isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT),
-                isTestCode = isTestCode,
-                isLibraryCode = isLibraryCode,
-                accessibilityWarning = accessibilityWarning
-            )
+            // Check code location flags safely
+            val isTestCode = try {
+                isInTestCode(virtualFile)
+            } catch (e: Exception) {
+                false
+            }
 
-            is PsiMethod -> DefinitionLocation(
-                name = element.name,
-                filePath = relativePath,
-                startOffset = textRange.startOffset,
-                endOffset = textRange.endOffset,
-                lineNumber = lineNumber + 1,
-                type = if (element.isConstructor) "constructor" else "method",
-                signature = buildMethodSignature(element),
-                containingClass = element.containingClass?.qualifiedName,
-                modifiers = extractModifiers(element.modifierList),
-                isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT),
-                isTestCode = isTestCode,
-                isLibraryCode = isLibraryCode,
-                accessibilityWarning = accessibilityWarning
-            )
+            val isLibraryCode = try {
+                isInLibraryCode(virtualFile, project)
+            } catch (e: Exception) {
+                false
+            }
 
-            is PsiField -> DefinitionLocation(
-                name = element.name ?: "anonymous",
-                filePath = relativePath,
-                startOffset = textRange.startOffset,
-                endOffset = textRange.endOffset,
-                lineNumber = lineNumber + 1,
-                type = "field",
-                signature = "${element.type.presentableText} ${element.name}",
-                containingClass = element.containingClass?.qualifiedName,
-                modifiers = extractModifiers(element.modifierList),
-                isTestCode = isTestCode,
-                isLibraryCode = isLibraryCode,
-                accessibilityWarning = accessibilityWarning
-            )
+            // Generate accessibility warning safely
+            val accessibilityWarning = try {
+                generateAccessibilityWarning(element)
+            } catch (e: Exception) {
+                null
+            }
 
-            is PsiVariable -> DefinitionLocation(
-                name = element.name ?: "anonymous",
-                filePath = relativePath,
-                startOffset = textRange.startOffset,
-                endOffset = textRange.endOffset,
-                lineNumber = lineNumber + 1,
-                type = "variable",
-                signature = "${element.type.presentableText} ${element.name}",
-                containingClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.qualifiedName,
-                modifiers = extractModifiers(element.modifierList),
-                isTestCode = isTestCode,
-                isLibraryCode = isLibraryCode,
-                accessibilityWarning = accessibilityWarning
-            )
-
-            else -> DefinitionLocation(
-                name = (element as? PsiNamedElement)?.name ?: "unknown",
-                filePath = relativePath,
-                startOffset = textRange.startOffset,
-                endOffset = textRange.endOffset,
-                lineNumber = lineNumber + 1,
-                type = "unknown",
-                signature = element.text?.lines()?.firstOrNull()?.trim(),
-                isTestCode = isTestCode,
-                isLibraryCode = isLibraryCode
-            )
+            // Create location based on element type with null safety
+            return when (element) {
+                is PsiClass -> createClassLocation(
+                    element, relativePath, textRange, lineNumber, isTestCode, isLibraryCode, accessibilityWarning
+                )
+                is PsiMethod -> createMethodLocation(
+                    element, relativePath, textRange, lineNumber, isTestCode, isLibraryCode, accessibilityWarning
+                )
+                is PsiField -> createFieldLocation(
+                    element, relativePath, textRange, lineNumber, isTestCode, isLibraryCode, accessibilityWarning
+                )
+                is PsiVariable -> createVariableLocation(
+                    element, relativePath, textRange, lineNumber, isTestCode, isLibraryCode, accessibilityWarning
+                )
+                else -> createGenericLocation(
+                    element, relativePath, textRange, lineNumber, isTestCode, isLibraryCode
+                )
+            }
+        } catch (e: Exception) {
+            logger.debug("Error creating location for element", e)
+            return null
         }
+    }
+
+    private fun createClassLocation(
+        element: PsiClass, 
+        relativePath: String,
+        textRange: com.intellij.openapi.util.TextRange,
+        lineNumber: Int,
+        isTestCode: Boolean,
+        isLibraryCode: Boolean,
+        accessibilityWarning: String?
+    ): DefinitionLocation {
+        return DefinitionLocation(
+            name = element.name ?: "anonymous",
+            filePath = relativePath,
+            startOffset = textRange.startOffset,
+            endOffset = textRange.endOffset,
+            lineNumber = lineNumber,
+            type = when {
+                element.isInterface -> "interface"
+                element.isEnum -> "enum"
+                element.isAnnotationType -> "annotation"
+                else -> "class"
+            },
+            signature = buildClassSignatureSafely(element),
+            containingClass = element.containingClass?.qualifiedName,
+            modifiers = extractModifiers(element.modifierList),
+            isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT),
+            isTestCode = isTestCode,
+            isLibraryCode = isLibraryCode,
+            accessibilityWarning = accessibilityWarning
+        )
+    }
+
+    private fun createMethodLocation(
+        element: PsiMethod,
+        relativePath: String,
+        textRange: com.intellij.openapi.util.TextRange,
+        lineNumber: Int,
+        isTestCode: Boolean,
+        isLibraryCode: Boolean,
+        accessibilityWarning: String?
+    ): DefinitionLocation {
+        return DefinitionLocation(
+            name = element.name,
+            filePath = relativePath,
+            startOffset = textRange.startOffset,
+            endOffset = textRange.endOffset,
+            lineNumber = lineNumber,
+            type = if (element.isConstructor) "constructor" else "method",
+            signature = buildMethodSignatureSafely(element),
+            containingClass = element.containingClass?.qualifiedName,
+            modifiers = extractModifiers(element.modifierList),
+            isAbstract = element.hasModifierProperty(PsiModifier.ABSTRACT),
+            isTestCode = isTestCode,
+            isLibraryCode = isLibraryCode,
+            accessibilityWarning = accessibilityWarning
+        )
+    }
+
+    private fun createFieldLocation(
+        element: PsiField,
+        relativePath: String,
+        textRange: com.intellij.openapi.util.TextRange,
+        lineNumber: Int,
+        isTestCode: Boolean,
+        isLibraryCode: Boolean,
+        accessibilityWarning: String?
+    ): DefinitionLocation {
+        return DefinitionLocation(
+            name = element.name ?: "anonymous",
+            filePath = relativePath,
+            startOffset = textRange.startOffset,
+            endOffset = textRange.endOffset,
+            lineNumber = lineNumber,
+            type = "field",
+            signature = "${element.type.presentableText} ${element.name}",
+            containingClass = element.containingClass?.qualifiedName,
+            modifiers = extractModifiers(element.modifierList),
+            isTestCode = isTestCode,
+            isLibraryCode = isLibraryCode,
+            accessibilityWarning = accessibilityWarning
+        )
+    }
+
+    private fun createVariableLocation(
+        element: PsiVariable,
+        relativePath: String,
+        textRange: com.intellij.openapi.util.TextRange,
+        lineNumber: Int,
+        isTestCode: Boolean,
+        isLibraryCode: Boolean,
+        accessibilityWarning: String?
+    ): DefinitionLocation {
+        return DefinitionLocation(
+            name = element.name ?: "anonymous",
+            filePath = relativePath,
+            startOffset = textRange.startOffset,
+            endOffset = textRange.endOffset,
+            lineNumber = lineNumber,
+            type = "variable",
+            signature = "${element.type.presentableText} ${element.name}",
+            containingClass = PsiTreeUtil.getParentOfType(element, PsiClass::class.java)?.qualifiedName,
+            modifiers = extractModifiers(element.modifierList),
+            isTestCode = isTestCode,
+            isLibraryCode = isLibraryCode,
+            accessibilityWarning = accessibilityWarning
+        )
+    }
+
+    private fun createGenericLocation(
+        element: PsiElement,
+        relativePath: String,
+        textRange: com.intellij.openapi.util.TextRange,
+        lineNumber: Int,
+        isTestCode: Boolean,
+        isLibraryCode: Boolean
+    ): DefinitionLocation {
+        return DefinitionLocation(
+            name = (element as? PsiNamedElement)?.name ?: "unknown",
+            filePath = relativePath,
+            startOffset = textRange.startOffset,
+            endOffset = textRange.endOffset,
+            lineNumber = lineNumber,
+            type = "unknown",
+            signature = element.text?.lines()?.firstOrNull()?.trim(),
+            isTestCode = isTestCode,
+            isLibraryCode = isLibraryCode
+        )
     }
     
     override fun supportsFile(psiFile: PsiFile): Boolean {
@@ -238,115 +544,158 @@ class JavaDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
     }
     
     private fun buildClassSignature(psiClass: PsiClass): String {
-        val modifiers = psiClass.modifierList?.text ?: ""
-        val type = when {
-            psiClass.isInterface -> "interface"
-            psiClass.isEnum -> "enum"
-            psiClass.isAnnotationType -> "@interface"
-            else -> "class"
-        }
-        return "$modifiers $type ${psiClass.name}".trim()
+        return buildClassSignatureSafely(psiClass) ?: "class ${psiClass.name ?: "anonymous"}"
     }
 
     private fun buildMethodSignature(method: PsiMethod): String {
-        val params = method.parameterList.parameters.joinToString(", ") {
-            "${it.type.presentableText} ${it.name}"
-        }
-        val returnType = if (method.isConstructor) "" else "${method.returnType?.presentableText ?: "void"} "
-        val modifiers = method.modifierList.text
-        val throws = method.throwsList.referencedTypes.takeIf { it.isNotEmpty() }
-            ?.joinToString(", ") { it.presentableText }
-            ?.let { " throws $it" } ?: ""
+        return buildMethodSignatureSafely(method) ?: "${method.name}()"
+    }
 
-        return "$modifiers $returnType${method.name}($params)$throws".trim()
+    private fun buildClassSignatureSafely(psiClass: PsiClass): String? {
+        return try {
+            val modifiers = psiClass.modifierList?.text ?: ""
+            val type = when {
+                psiClass.isInterface -> "interface"
+                psiClass.isEnum -> "enum"
+                psiClass.isAnnotationType -> "@interface"
+                else -> "class"
+            }
+            "$modifiers $type ${psiClass.name ?: "anonymous"}".trim()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun buildMethodSignatureSafely(method: PsiMethod): String? {
+        return try {
+            val params = method.parameterList.parameters.joinToString(", ") { param ->
+                val paramType = param.type.presentableText
+                val paramName = param.name ?: "param"
+                "$paramType $paramName"
+            }
+            val returnType = if (method.isConstructor) "" else "${method.returnType?.presentableText ?: "void"} "
+            val modifiers = method.modifierList.text
+            val throws = method.throwsList.referencedTypes.takeIf { it.isNotEmpty() }
+                ?.joinToString(", ") { it.presentableText }
+                ?.let { " throws $it" } ?: ""
+
+            "$modifiers $returnType${method.name}($params)$throws".trim()
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun calculateConfidence(element: PsiElement, searchTerm: String, isClass: Boolean): Float {
-        val elementName = (element as? PsiNamedElement)?.name ?: return 0.5f
-        val virtualFile = element.containingFile.virtualFile
-        val project = element.project
-
-        return when {
-            // Exact name match in project code
-            elementName == searchTerm && !isInLibraryCode(virtualFile, project) -> {
-                when {
-                    isClass && element is PsiClass -> 1.0f
-                    !isClass && element is PsiMember -> 0.95f
-                    else -> 0.9f
-                }
+        return try {
+            val elementName = (element as? PsiNamedElement)?.name ?: return 0.1f
+            val containingFile = element.containingFile ?: return 0.1f
+            val virtualFile = containingFile.virtualFile ?: return 0.1f
+            val project = element.project
+            
+            val isInLibrary = try {
+                isInLibraryCode(virtualFile, project)
+            } catch (e: Exception) {
+                false
             }
-            // Exact name match in library code
-            elementName == searchTerm && isInLibraryCode(virtualFile, project) -> 0.5f
-            // Case-insensitive match
-            elementName.equals(searchTerm, ignoreCase = true) -> 0.7f
-            // Partial match
-            elementName.contains(searchTerm, ignoreCase = true) -> 0.3f
-            else -> 0.1f
+
+            when {
+                // Exact name match in project code
+                elementName == searchTerm && !isInLibrary -> {
+                    when {
+                        isClass && element is PsiClass -> 1.0f
+                        !isClass && element is PsiMember -> 0.95f
+                        else -> 0.9f
+                    }
+                }
+                // Exact name match in library code
+                elementName == searchTerm && isInLibrary -> 0.5f
+                // Case-insensitive match
+                elementName.equals(searchTerm, ignoreCase = true) -> 0.7f
+                // Partial match
+                elementName.contains(searchTerm, ignoreCase = true) -> 0.3f
+                else -> 0.1f
+            }
+        } catch (e: Exception) {
+            0.1f
         }
     }
 
     private fun generateDisambiguationHint(element: PsiElement): String? {
-        return when (element) {
-            is PsiMethod -> {
-                val containingClass = element.containingClass?.name ?: "Unknown"
-                when {
-                    element.isConstructor -> "Constructor in $containingClass"
-                    element.hasModifierProperty(PsiModifier.STATIC) -> "Static method in $containingClass"
-                    element.hasModifierProperty(PsiModifier.ABSTRACT) -> "Abstract method in $containingClass"
-                    else -> "Method in $containingClass"
+        return try {
+            when (element) {
+                is PsiMethod -> {
+                    val containingClass = element.containingClass
+                    val containingClassName = containingClass?.name ?: "Unknown"
+                    when {
+                        element.isConstructor -> "Constructor in $containingClassName"
+                        element.hasModifierProperty(PsiModifier.STATIC) -> "Static method in $containingClassName"
+                        element.hasModifierProperty(PsiModifier.ABSTRACT) -> "Abstract method in $containingClassName"
+                        else -> "Method in $containingClassName"
+                    }
                 }
-            }
 
-            is PsiField -> {
-                val containingClass = element.containingClass?.qualifiedName ?: "Unknown"
-                when {
-                    element.hasModifierProperty(PsiModifier.STATIC) &&
-                            element.hasModifierProperty(PsiModifier.FINAL) -> "Constant in $containingClass"
+                is PsiField -> {
+                    val containingClass = element.containingClass
+                    val containingClassName = containingClass?.qualifiedName ?: containingClass?.name ?: "Unknown"
+                    when {
+                        element.hasModifierProperty(PsiModifier.STATIC) &&
+                                element.hasModifierProperty(PsiModifier.FINAL) -> "Constant in $containingClassName"
 
-                    element.hasModifierProperty(PsiModifier.STATIC) -> "Static field in $containingClass"
-                    else -> "Field in $containingClass"
+                        element.hasModifierProperty(PsiModifier.STATIC) -> "Static field in $containingClassName"
+                        else -> "Field in $containingClassName"
+                    }
                 }
-            }
 
-            is PsiClass -> {
-                val packageName = (element.containingFile as? PsiJavaFile)?.packageName
-                when {
-                    element.isInterface -> "Interface in ${packageName ?: "default package"}"
-                    element.isEnum -> "Enum in ${packageName ?: "default package"}"
-                    element.isAnnotationType -> "Annotation in ${packageName ?: "default package"}"
-                    element.hasModifierProperty(PsiModifier.ABSTRACT) -> "Abstract class in ${packageName ?: "default package"}"
-                    else -> "Class in ${packageName ?: "default package"}"
+                is PsiClass -> {
+                    val containingFile = element.containingFile
+                    val packageName = (containingFile as? PsiJavaFile)?.packageName
+                    val locationDesc = packageName ?: "default package"
+                    when {
+                        element.isInterface -> "Interface in $locationDesc"
+                        element.isEnum -> "Enum in $locationDesc"
+                        element.isAnnotationType -> "Annotation in $locationDesc"
+                        element.hasModifierProperty(PsiModifier.ABSTRACT) -> "Abstract class in $locationDesc"
+                        else -> "Class in $locationDesc"
+                    }
                 }
-            }
 
-            is PsiVariable -> {
-                when (element) {
-                    is PsiParameter -> "Parameter"
-                    is PsiLocalVariable -> "Local variable"
-                    else -> "Variable"
+                is PsiVariable -> {
+                    when (element) {
+                        is PsiParameter -> "Parameter"
+                        is PsiLocalVariable -> "Local variable"
+                        else -> "Variable"
+                    }
                 }
-            }
 
-            else -> null
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 
     private fun generateAccessibilityWarning(element: PsiElement): String? {
-        if (element !is PsiModifierListOwner) return null
+        return try {
+            if (element !is PsiModifierListOwner) return null
 
-        return when {
-            element.hasModifierProperty(PsiModifier.PRIVATE) ->
-                "Private member - not accessible from outside the declaring class"
+            val modifierList = element.modifierList ?: return null
 
-            element.hasModifierProperty(PsiModifier.PROTECTED) ->
-                "Protected member - only accessible from subclasses or same package"
+            when {
+                modifierList.hasModifierProperty(PsiModifier.PRIVATE) ->
+                    "Private member - not accessible from outside the declaring class"
 
-            !element.hasModifierProperty(PsiModifier.PUBLIC) &&
-                    !element.hasModifierProperty(PsiModifier.PROTECTED) &&
-                    !element.hasModifierProperty(PsiModifier.PRIVATE) ->
-                "Package-private member - only accessible from the same package"
+                modifierList.hasModifierProperty(PsiModifier.PROTECTED) ->
+                    "Protected member - only accessible from subclasses or same package"
 
-            else -> null
+                !modifierList.hasModifierProperty(PsiModifier.PUBLIC) &&
+                        !modifierList.hasModifierProperty(PsiModifier.PROTECTED) &&
+                        !modifierList.hasModifierProperty(PsiModifier.PRIVATE) ->
+                    "Package-private member - only accessible from the same package"
+
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 }

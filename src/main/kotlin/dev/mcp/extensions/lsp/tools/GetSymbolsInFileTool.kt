@@ -21,67 +21,22 @@ class GetSymbolsInFileTool : AbstractMcpTool<GetSymbolsArgs>(GetSymbolsArgs.seri
     private val logger = Logger.getInstance(GetSymbolsInFileTool::class.java)
 
     override val name: String = "get_symbols_in_file"
-    override val description: String = """
-        Extract symbols from a file with LSP-standard symbol type filtering.
-        
-        **symbolTypes** (optional): Filter by Language Server Protocol standard symbol types.
-        
-        **Core Type Definitions (LSP 5,10,11,23):**
-        - `"class"` - Class definitions (UserService, ApiController)
-        - `"interface"` - Interface definitions (UserListener, Comparable)  
-        - `"enum"` - Enum type definitions (UserEvent, Color, Status)
-        - `"struct"` - Struct definitions (C/C++/Rust/Go)
-        
-        **Data & Storage (LSP 7,8,13,14,22):**
-        - `"field"` - Instance/class properties (name, email, description)
-        - `"constant"` - Static final values (DEFAULT_ROLE, MAX_USERS, PI)
-        - `"variable"` - Local variables and parameters
-        - `"property"` - Properties with getters/setters (Kotlin/C#)
-        - `"enum_member"` - Enum values/constants (CREATED, UPDATED, DELETED)
-        
-        **Behavior & Logic (LSP 6,9,12,24,25):**
-        - `"method"` - Class methods and procedures
-        - `"constructor"` - Object constructors and initializers
-        - `"function"` - Standalone/global functions
-        - `"event"` - Event definitions (C#/JavaScript)
-        - `"operator"` - Operator overloads (C++/Python)
-        
-        **Organization (LSP 1,2,3,4,26):**
-        - `"file"` - File-level symbols
-        - `"module"` - Module definitions (Python/JavaScript)
-        - `"namespace"` - Namespace definitions (C++/C#)
-        - `"package"` - Package definitions (Java/Go)
-        - `"type_parameter"` - Generic type parameters (<T>, <K,V>)
-        
-        **Modern Extensions (Beyond LSP):**
-        - `"component"` - UI components (React/Vue/Angular)
-        - `"hook"` - React hooks (useState, useEffect)
-        - `"async_function"` - Async/await functions
-        - `"generator"` - Generator functions
-        - `"decorator"` - Decorators/annotations
-        - `"import"` - Import statements
-        
-        **Common Usage Patterns:**
-        - All type definitions: `["class", "interface", "enum", "struct"]`
-        - All data: `["field", "constant", "variable", "property", "enum_member"]`
-        - All behavior: `["method", "constructor", "function"]`
-        - Constants only: `["constant", "enum_member"]`
-        - Java basics: `["class", "interface", "enum", "method", "field", "constant"]`
-        - Find the position of a symbol
-        
-        **Other Parameters:**
-        - filePath: Path to the file relative to project root
-        - hierarchical: If true, returns nested structure (methods inside classes). If false, returns flat list
-        - includeImports: Whether to include import statements
-        - includePrivate: Include private members (default: true)
-        - includeGenerated: Include generated/synthetic code (default: false)
-        - maxDepth: Maximum nesting depth for hierarchical view
-        
-        Returns: List of symbols with exact positions, types, modifiers, and metadata.
-        Each result includes startOffset/endOffset for follow-up interactions like precise code modifications.
-        
-        Supports: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}
-    """.trimIndent()
+    override val description: String = """Extract symbols from a file. Understands code for complex file queries. 
+
+symbolTypes: ${SymbolExtractorFactory.getSupportedSymbolTypes().sorted().joinToString(", ") { "\"$it\"" }}
+Parameters:
+- filePath (required): relative to project root
+- symbolTypes (default: all): Filter the returned symbols to include these types
+- hierarchical (default: true): true=nested, false=flat list (use false for position searches)
+- includeImports (default: false): include import statements
+- includePrivate (default: true): include private members 
+- includeGenerated (default: false): include synthetic code
+- maxDepth (default: 10): max nesting for hierarchical view
+
+Returns: [{name, kind, startOffset, endOffset, visibility, modifiers, signature, children}]
+Each symbol has exact offsets for use with other tools.
+
+Supported: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}""".trimIndent()
 
     /**
      * Handles the symbol extraction request for a file.

@@ -267,6 +267,26 @@ class PythonSymbolExtractor : PythonBaseHandler(), SymbolExtractor {
     }
 
     override fun getSupportedLanguage(): String = "Python"
+    
+    override fun getSupportedSymbolTypes(includeFrameworkTypes: Boolean): Set<String> {
+        // Python core symbol types
+        return setOf(
+            "class",
+            "function",
+            "async_function",
+            "generator",
+            "method",
+            "constructor",
+            "property",
+            "variable",
+            "constant",
+            "field",
+            "import",
+            "module",
+            "package",
+            "decorator"
+        )
+    }
 
     private fun extractClassInfo(
         pyClass: PyClass,

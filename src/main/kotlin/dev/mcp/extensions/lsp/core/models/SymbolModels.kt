@@ -13,7 +13,7 @@ data class GetSymbolsArgs(
     val includeImports: Boolean = false,
     val includePrivate: Boolean = true,
     val includeGenerated: Boolean = false,
-    val maxDepth: Int = Int.MAX_VALUE
+    val maxDepth: Int = 10
 )
 
 /**

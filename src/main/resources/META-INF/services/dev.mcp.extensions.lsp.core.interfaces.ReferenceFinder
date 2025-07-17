@@ -1,2 +1,3 @@
 dev.mcp.extensions.lsp.languages.java.JavaReferenceFinder
 dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder
+dev.mcp.extensions.lsp.languages.javascript.JavaScriptReferenceFinder

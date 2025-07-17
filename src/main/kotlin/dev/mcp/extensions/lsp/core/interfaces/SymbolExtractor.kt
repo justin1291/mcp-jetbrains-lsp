@@ -41,4 +41,13 @@ interface SymbolExtractor {
      * @return Language name or description
      */
     fun getSupportedLanguage(): String
+    
+    /**
+     * Get the symbol types supported by this language implementation.
+     * This allows each language to declare its own symbol types.
+     * 
+     * @param includeFrameworkTypes If true, include framework-specific types (React components, etc.)
+     * @return Set of supported symbol type strings
+     */
+    fun getSupportedSymbolTypes(includeFrameworkTypes: Boolean = true): Set<String>
 }

@@ -1,2 +1,3 @@
 dev.mcp.extensions.lsp.languages.java.JavaDefinitionFinder
 dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder
+dev.mcp.extensions.lsp.languages.javascript.JavaScriptDefinitionFinder

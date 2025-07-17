@@ -15,6 +15,8 @@ object ReferenceFinderFactory {
 
     private const val JAVA_REFERENCE_FINDER = "dev.mcp.extensions.lsp.languages.java.JavaReferenceFinder"
     private const val PYTHON_REFERENCE_FINDER = "dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder"
+    private const val JAVASCRIPT_REFERENCE_FINDER =
+        "dev.mcp.extensions.lsp.languages.javascript.JavaScriptReferenceFinder"
 
     /**
      * Get the appropriate reference finder for a given element.
@@ -43,6 +45,11 @@ object ReferenceFinderFactory {
                 DynamicServiceLoader.loadReferenceFinder(PYTHON_REFERENCE_FINDER)
             }
 
+            isJavaScriptOrTypeScript(language) -> {
+                logger.debug("Looking for JavaScript/TypeScript reference finder service")
+                DynamicServiceLoader.loadReferenceFinder(JAVASCRIPT_REFERENCE_FINDER)
+            }
+
             else -> null
         }
 
@@ -63,6 +70,11 @@ object ReferenceFinderFactory {
                         "Please restart the IDE or reinstall the plugin."
             }
 
+            isJavaScriptOrTypeScript(language) -> {
+                "JavaScript/TypeScript support is not available in this IDE. " +
+                        "JavaScript/TypeScript is supported in WebStorm or IntelliJ IDEA Ultimate with the JavaScript plugin installed."
+            }
+
             else -> {
                 "Language not supported: $languageName (id: $languageId)"
             }
@@ -80,5 +92,12 @@ object ReferenceFinderFactory {
     private fun isPython(language: Language): Boolean {
         val id = language.id
         return id == "Python" || id == "PythonCore"
+    }
+
+    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
+        val id = language.id
+        return id == "JavaScript" || id == "TypeScript" ||
+                id == "JSX" || id == "TSX" ||
+                id == "ECMAScript 6"
     }
 }
