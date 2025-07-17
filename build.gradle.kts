@@ -68,8 +68,8 @@ dependencies {
         testPlugin("PythonCore:251.23774.460")
     }
 
-    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
 }
