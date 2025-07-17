@@ -12,7 +12,7 @@ plugins {
 }
 
 group = "dev.mcp.extensions"
-version = "1.1.0"
+version = "1.1.1"
 
 // Load local properties if they exist
 val localProperties = Properties()

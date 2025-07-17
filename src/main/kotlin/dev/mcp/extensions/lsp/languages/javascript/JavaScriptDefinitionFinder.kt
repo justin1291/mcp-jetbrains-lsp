@@ -28,7 +28,7 @@ class JavaScriptDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
         if (psiFile.virtualFile == null) {
             return emptyList()
         }
-        
+
         if (position < 0 || position >= psiFile.textLength) {
             return emptyList()
         }
@@ -179,7 +179,7 @@ class JavaScriptDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
             val callExpression = PsiTreeUtil.getParentOfType(element, JSCallExpression::class.java)
             if (callExpression != null) {
                 val methodExpression = callExpression.methodExpression
-                
+
                 // Handle HOC patterns like withRouter(Component)
                 if (methodExpression is JSReferenceExpression) {
                     val referencedName = methodExpression.referencedName
@@ -255,10 +255,10 @@ class JavaScriptDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
     }
 
     private fun isJavaScriptSymbol(element: PsiElement): Boolean {
-        return element is JSFunction || 
-               element is JSClass || 
-               element is JSVariable || 
-               element is JSField || 
+        return element is JSFunction ||
+               element is JSClass ||
+               element is JSVariable ||
+               element is JSField ||
                element is JSProperty
     }
 
@@ -282,7 +282,7 @@ class JavaScriptDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
             }
             is JSVariable -> {
                 val name = element.name
-                name != null && isReactComponentName(name) && 
+                name != null && isReactComponentName(name) &&
                 element.initializer is JSFunction
             }
             else -> false
@@ -341,7 +341,7 @@ class JavaScriptDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
 
             // Sort by confidence and prioritize JavaScript symbols over CSS
             definitions.sortByDescending { it.confidence }
-            
+
         } catch (e: Exception) {
             logger.error("Error finding definitions by name", e)
         }
