@@ -56,3 +56,9 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Local Development ###
+gradle.properties.local
+.local.properties
+local.properties
+*.local.properties

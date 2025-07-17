@@ -16,6 +16,8 @@ object DefinitionFinderFactory {
 
     private const val JAVA_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.java.JavaDefinitionFinder"
     private const val PYTHON_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"
+    private const val JAVASCRIPT_DEFINITION_FINDER =
+        "dev.mcp.extensions.lsp.languages.javascript.JavaScriptDefinitionFinder"
 
     /**
      * Get the appropriate definition finder for a given file.
@@ -69,6 +71,16 @@ object DefinitionFinderFactory {
                 }
             }
 
+            isJavaScriptOrTypeScript(language) -> {
+                logger.debug("Looking for JavaScript/TypeScript definition finder service")
+                try {
+                    DynamicServiceLoader.loadDefinitionFinder(JAVASCRIPT_DEFINITION_FINDER)
+                } catch (e: Exception) {
+                    logger.debug("JavaScript definition finder service not available: ${e.message}")
+                    null
+                }
+            }
+
             else -> null
         }
 
@@ -89,6 +101,11 @@ object DefinitionFinderFactory {
                         "Please restart the IDE or reinstall the plugin."
             }
 
+            isJavaScriptOrTypeScript(language) -> {
+                "JavaScript/TypeScript support is not available in this IDE. " +
+                        "JavaScript/TypeScript is supported in WebStorm or IntelliJ IDEA Ultimate with the JavaScript plugin installed."
+            }
+
             else -> {
                 "Language not supported: $languageName (id: $languageId)"
             }
@@ -106,5 +123,12 @@ object DefinitionFinderFactory {
     private fun isPython(language: Language): Boolean {
         val id = language.id
         return id == "Python" || id == "PythonCore"
+    }
+
+    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
+        val id = language.id
+        return id == "JavaScript" || id == "TypeScript" ||
+                id == "JSX" || id == "TSX" ||
+                id == "ECMAScript 6"
     }
 }

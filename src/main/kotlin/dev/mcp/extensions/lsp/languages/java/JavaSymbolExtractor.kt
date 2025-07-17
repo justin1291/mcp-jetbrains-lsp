@@ -20,7 +20,7 @@ import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
 
     override fun extractSymbolsFlat(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
-        logger.info("Extracting symbols (flat) from Java/Kotlin file: ${psiFile.name}")
+        logger.debug("Extracting symbols (flat) from Java/Kotlin file: ${psiFile.name}")
 
         val symbols = mutableListOf<SymbolInfo>()
 
@@ -79,7 +79,7 @@ class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
     }
 
     override fun extractSymbolsHierarchical(psiFile: PsiFile, args: GetSymbolsArgs): List<SymbolInfo> {
-        logger.info("Extracting symbols (hierarchical) from Java/Kotlin file: ${psiFile.name}")
+        logger.debug("Extracting symbols (hierarchical) from Java/Kotlin file: ${psiFile.name}")
 
         val symbols = mutableListOf<SymbolInfo>()
 
@@ -123,22 +123,18 @@ class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
         // Process each top-level class
         classes.forEach { psiClass ->
             val kind = getClassKind(psiClass)
-            println("DEBUG hierarchical: Processing class ${psiClass.name} (${kind})")
+            logger.debug("Hierarchical: Processing class ${psiClass.name} (${kind})")
             if (shouldIncludeSymbol(kind, args.symbolTypes)) {
-                println("DEBUG hierarchical: Symbol type matches, extracting...")
+                logger.debug("Hierarchical: Symbol type matches, extracting...")
                 val symbol = extractClassInfo(psiClass, includeChildren = true, args = args)
                 if (shouldIncludeSymbol(symbol, args)) {
-                    println("DEBUG hierarchical: Adding ${symbol.name} with ${symbol.children?.size ?: 0} children")
+                    logger.debug("Hierarchical: Adding ${symbol.name} with ${symbol.children?.size ?: 0} children")
                     symbols.add(symbol)
-                } else {
-                    println("DEBUG hierarchical: Symbol filtered out by shouldIncludeSymbol")
                 }
-            } else {
-                println("DEBUG hierarchical: Filtered out by symbol type")
             }
         }
 
-        logger.debug("Extracted ${symbols.size} hierarchical symbols total")
+        logger.debug("Extracted ${symbols.size} Hierarchical symbols total")
         return symbols
     }
 
@@ -149,6 +145,27 @@ class JavaSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
 
     override fun getSupportedLanguage(): String {
         return "Java/Kotlin"
+    }
+    
+    override fun getSupportedSymbolTypes(includeFrameworkTypes: Boolean): Set<String> {
+        return setOf(
+            "class",
+            "interface", 
+            "enum",
+            "annotation",
+            "method",
+            "constructor",
+            "field",
+            "constant",
+            "enum_member",
+            "variable",
+            "parameter",
+            "property",
+            "import",
+            "package",
+            "module",
+            "type_parameter"
+        )
     }
 
     private fun extractClassInfo(

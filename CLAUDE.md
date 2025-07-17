@@ -46,18 +46,6 @@ run_configuration - Runs the specified run configuration
 ./gradlew clean build
 ```
 
-## Known Issues
-
-### Python Test Environment
-Python tests currently fail in standard IntelliJ IDEA Community test environment because the Python plugin is not loaded. This is expected behavior for optional plugin dependencies.
-
-**Workarounds:**
-1. Run tests in PyCharm (where Python support is built-in)
-2. Skip Python tests: `./gradlew test -Dskip.python.tests=true`
-3. Test Python functionality manually using "Run IDE with Plugin" configuration
-
-See `src/test/kotlin/dev/mcp/extensions/lsp/languages/python/README.md` for details.
-
 ## Architecture
 
 The plugin follows a modular, factory-based architecture that separates concerns:
@@ -99,8 +87,7 @@ To add support for a new language (e.g., Python):
 
 ### Test Configuration
 - Uses JUnit 5 with JUnit 4 compatibility layer (required by IntelliJ Platform)
-- Tests require PSI document commits: `PsiDocumentManager.getInstance(project).commitAllDocuments()`
-- Memory settings: 2048MB for tests
+- Tests should not create files in the test environment and should use mock data where possible
 
 ### Performance Considerations
 - Factory caching prevents repeated instantiation

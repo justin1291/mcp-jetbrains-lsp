@@ -20,28 +20,25 @@ class GetHoverInfoTool : AbstractMcpTool<GetHoverArgs>(GetHoverArgs.serializer()
     private val logger = Logger.getInstance(GetHoverInfoTool::class.java)
 
     override val name: String = "get_hover_info"
-    override val description: String = """
-        Get type info and docs at position. Like IDE hover/Ctrl+Q but with more intel.
-        
-        Use when: need type info, read docs, check signatures, see modifiers, inheritance, usage stats, deprecation
-        
-        Returns:
-        - Basic: name, type, signature, modifiers, javadoc
-        - Classes: superTypes, implementedBy (interfaces)
-        - Methods: overriddenBy, calledByCount, complexity, throwsExceptions
-        - Extracted tags: @since, @see, @deprecated message
-        - Fields: usage count
-        
-        Params:
-        - filePath: relative to project
-        - position: char offset (use get_symbols_in_file startOffset)
-        
-        Workflow: get_symbols_in_file -> use startOffset -> hover for details
-        
-        Supported languages: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}
-        
-        IntelliJ extras: implementors, overrides, usage counts, complexity metrics
-    """.trimIndent()
+    override val description: String = """Get type info and docs at position.
+
+Use when: need type info, read docs, check signatures, see modifiers
+
+Returns:
+- Basic: name, type, signature, modifiers, javaDoc, jsDoc
+- Classes: superTypes, implementedBy (interfaces)
+- Methods: overriddenBy, calledByCount, complexity, throwsExceptions
+- Extracted tags: @since, @see, @deprecated message
+- Fields: usage count
+
+Params:
+- filePath: relative to project
+- position: char offset (use get_symbols_in_file startOffset)
+
+Workflow: get_symbols_in_file -> use startOffset -> hover for details
+
+Supported languages: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}
+""".trimIndent()
 
     /**
      * Handles the hover information request for a specific position in a file.

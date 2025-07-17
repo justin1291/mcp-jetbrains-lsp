@@ -108,21 +108,9 @@ cd mcp-idea-lsp
 4. Restart the IDE
 
 ## Prerequisites
-- IntelliJ IDEA 2024.3 or later
+- IntelliJ IDEA 2025.1 or later
 - [MCP Server Plugin](https://plugins.jetbrains.com/plugin/12345-mcp-server) v1.0.30+
 - Java 21 or later
-
-## Documentation
-
-### Language Feature Documentation
-Detailed documentation about language-specific features and implementation considerations can be found in the `docs/language-features/` directory:
-
-- **[Java Features](docs/language-features/java-features.md)** - Java and Kotlin language specifics
-- **[Python Features](docs/language-features/python-features.md)** - Python language specifics (for ongoing implementation)
-- **[JavaScript Features](docs/language-features/javascript-features.md)** - JavaScript/TypeScript specifics (planned)
-- **[API Design Considerations](docs/language-features/api-design-considerations.md)** - Cross-language insights and future API improvements
-
-This documentation helps guide implementation decisions and ensures we properly handle each language's unique features.
 
 ## MCP Tools API Reference
 
@@ -256,52 +244,17 @@ Get type information and documentation for a symbol at a position.
 
 ## Development
 
-### Building
-```bash
-./gradlew build
-```
+### Developing with Commercial IDE Modules
 
-### Testing
-```bash
-# Run all tests
-./gradlew test
+Many IntelliJ Platform modules are only available in commercial IDEs (Ultimate, WebStorm, etc.), including JavaScript, Database Tools, Python Pro, PHP, and others. To develop features using these modules while maintaining Community Edition compatibility:
 
-# Run specific test
-./gradlew test --tests "*.GetSymbolsInFileToolTest"
-```
+1. **Setup local IDE** (required on macOS): Copy `.local.properties.example` to `.local.properties` and set your IDE path:
+   ```properties
+   localIdePath=/Applications/IntelliJ IDEA Ultimate.app
+   ```
+   **Note**: macOS requires a local installation due to JetBrains Runtime compatibility issues with downloaded IDEs.
 
-### Running in Development
-```bash
-./gradlew runIde
-```
-
-### Creating a Release
-
-This project uses [Release Please](https://github.com/googleapis/release-please) for automated releases.
-
-**How it works:**
-1. Use [Conventional Commits](https://www.conventionalcommits.org/) in your commit messages:
-   - `fix:` for bug fixes (creates a patch release)
-   - `feat:` for new features (creates a minor release)
-   - `feat!:` or `BREAKING CHANGE:` for breaking changes (creates a major release)
-   - `chore:`, `docs:`, `style:`, `refactor:`, `test:` don't trigger releases
-
-2. Release Please automatically:
-   - Creates/updates a PR with version bumps and changelog
-   - When you merge that PR, it creates a GitHub release
-   - Uploads the plugin ZIP to the release
-
-**Example commits:**
-```bash
-# Bug fix (1.0.0 → 1.0.1)
-git commit -m "fix: handle null PSI elements in symbol extraction"
-
-# New feature (1.0.1 → 1.1.0)
-git commit -m "feat: add support for Kotlin coroutines"
-
-# Breaking change (1.1.0 → 2.0.0)
-git commit -m "feat!: change API response format"
-```
+The build uses local installations when available (faster), but falls back to downloading from CDN. Each developer configures their setup via `.local.properties` (gitignored).
 
 ## Project Structure
 ```
@@ -349,67 +302,9 @@ Verify all tools are registered in `plugin.xml`:
 </extensions>
 ```
 
-### Performance Issues
-- **Invalidate Caches**: File → Invalidate Caches and Restart
-- **Memory Settings**: Help → Change Memory Settings (increase to 2048MB+)
-- **Review Usage**: Avoid excessive searches on large codebases
-
-### Build Issues
-- **Clean Build**: `./gradlew clean build`
-- **Check Java Version**: Ensure Java 21 is configured
-- **Verify Dependencies**: Run `./gradlew dependencies` to check resolution
-
-### Test Dependencies Not Resolved
-Ensure your `build.gradle.kts` includes all required dependencies:
-```kotlin
-dependencies {
-    intellijPlatform {
-        create("IC", "2024.3")
-        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
-        plugin("com.intellij.mcpServer", "1.0.30")
-        bundledPlugin("com.intellij.java")
-        instrumentationTools()
-        testImplementation()
-    }
-    
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
-}
-```
-
-### PSI Elements Not Found in Tests
-Ensure documents are committed in test setup:
-```kotlin
-@BeforeEach
-override fun setUp() {
-    super.setUp()
-    PsiDocumentManager.getInstance(project).commitAllDocuments()
-}
-```
-
-### Memory Issues During Tests
-If tests fail with OutOfMemoryError:
-```kotlin
-tasks {
-    test {
-        useJUnitPlatform()
-        jvmArgs("-Xmx2048m")
-    }
-}
-```
-
 ## Roadmap
 
-### Phase 3: JavaScript/TypeScript Support
-- **JS/TS Symbol Extraction**: Classes, functions, React components, exports
-- **JS/TS Definition Finding**: Navigate through modules and node_modules
-- **JS/TS Reference Finding**: Track usage across files and imports
-- **JS/TS Hover Info**: JSDoc, type information, component props
-
 ### Future Enhancements
-- **Go Support**: Structs, interfaces, functions, methods
-- **Rust Support**: Structs, traits, functions, macros
 - **Multi-language Projects**: Handle mixed codebases seamlessly
 - **Performance Optimizations**: Caching, incremental updates
 - **Advanced Features**: Call hierarchy, type hierarchy, rename refactoring
@@ -429,28 +324,11 @@ Thanks to our modular architecture, adding a new language is straightforward:
 - **Language Features**: Map to common concepts (decorators → annotations)
 - **Performance**: Use language-specific indices for fast lookups
 
-### Testing New Languages
-```kotlin
-class PythonSymbolExtractorTest : BaseTest() {
-    @Test
-    fun testExtractPythonClass() {
-        val file = myFixture.addFileToProject("test.py", """
-            class MyClass:
-                def method(self):
-                    pass
-        """.trimIndent())
-        
-        val symbols = extractor.extractSymbolsFlat(file, args)
-        assertTrue(symbols.any { it.name == "MyClass" && it.kind == "class" })
-    }
-}
-```
-
 ## Contributing
 
 ### Development Setup
 1. Clone the repository
-2. Open in IntelliJ IDEA (2024.3+)
+2. Open in IntelliJ IDEA (2025.1+)
 3. Import as Gradle project
 4. Run `./gradlew build`
 
@@ -459,18 +337,6 @@ class PythonSymbolExtractorTest : BaseTest() {
 - Follow existing patterns for consistency
 - Add KDoc for public APIs
 - No inline comments - use descriptive names
-
-### Testing
-```bash
-# Run all tests
-./gradlew test
-
-# Run with coverage
-./gradlew test jacocoTestReport
-
-# Run specific test
-./gradlew test --tests "*.PythonSymbolExtractorTest"
-```
 
 ### Submitting Changes
 1. Fork and create feature branch
@@ -495,15 +361,11 @@ class PythonSymbolExtractorTest : BaseTest() {
 
 ### Getting Help
 - **Issues**: Report bugs or request features
-- **Discussions**: Ask questions or share ideas
-- **Wiki**: Architecture details and guides
+- **Discussions**: Ask questions or share idea
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
-
-- Built on top of the [JetBrains MCP Server Plugin](https://github.com/JetBrains/mcp-server-plugin)
 - Inspired by [Serena](https://github.com/oraios/serena) - Python MCP language service
-- Uses IntelliJ Platform SDK for code analysis

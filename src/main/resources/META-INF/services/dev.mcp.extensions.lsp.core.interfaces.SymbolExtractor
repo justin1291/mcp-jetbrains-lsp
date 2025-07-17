@@ -1,2 +1,3 @@
 dev.mcp.extensions.lsp.languages.java.JavaSymbolExtractor
 dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor
+dev.mcp.extensions.lsp.languages.javascript.JavaScriptSymbolExtractor

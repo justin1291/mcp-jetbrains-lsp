@@ -4,13 +4,26 @@ import kotlinx.serialization.Serializable
 
 /**
  * Arguments for finding symbol definitions.
+ * 
+ * Usage modes:
+ * 1. By name: Provide only symbolName
+ * 2. By position: Provide filePath and position
+ * 3. Hybrid: Provide all three for disambiguation
+ * 
+ * Either symbolName OR (filePath AND position) must be provided.
  */
 @Serializable
 data class FindDefinitionArgs(
-    val symbolName: String?,
+    val symbolName: String? = null,
     val filePath: String? = null,
     val position: Int? = null
-)
+) {
+    init {
+        require(symbolName != null || (filePath != null && position != null)) {
+            "Either symbolName or both filePath and position must be provided"
+        }
+    }
+}
 
 /**
  * Location of a symbol definition.

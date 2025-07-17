@@ -17,6 +17,8 @@ object HoverInfoProviderFactory {
     // Service class names - no direct imports needed
     private const val JAVA_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.java.JavaHoverInfoProvider"
     private const val PYTHON_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"
+    private const val JAVASCRIPT_HOVER_INFO_PROVIDER =
+        "dev.mcp.extensions.lsp.languages.javascript.JavaScriptHoverInfoProvider"
 
     /**
      * Get the appropriate hover info provider for a given file.
@@ -60,6 +62,11 @@ object HoverInfoProviderFactory {
                 DynamicServiceLoader.loadHoverInfoProvider(PYTHON_HOVER_INFO_PROVIDER)
             }
 
+            isJavaScriptOrTypeScript(language) -> {
+                logger.debug("Looking for JavaScript/TypeScript hover info provider service")
+                DynamicServiceLoader.loadHoverInfoProvider(JAVASCRIPT_HOVER_INFO_PROVIDER)
+            }
+
             else -> null
         }
 
@@ -80,6 +87,11 @@ object HoverInfoProviderFactory {
                         "Please restart the IDE or reinstall the plugin."
             }
 
+            isJavaScriptOrTypeScript(language) -> {
+                "JavaScript/TypeScript support is not available in this IDE. " +
+                        "JavaScript/TypeScript is supported in WebStorm or IntelliJ IDEA Ultimate with the JavaScript plugin installed."
+            }
+
             else -> {
                 "Language not supported: $languageName (id: $languageId)"
             }
@@ -97,5 +109,12 @@ object HoverInfoProviderFactory {
     private fun isPython(language: Language): Boolean {
         val id = language.id
         return id == "Python" || id == "PythonCore"
+    }
+
+    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
+        val id = language.id
+        return id == "JavaScript" || id == "TypeScript" ||
+                id == "JSX" || id == "TSX" ||
+                id == "ECMAScript 6"
     }
 }
