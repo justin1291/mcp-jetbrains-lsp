@@ -1,8 +1,16 @@
 <idea-plugin>
-    <extensions defaultExtensionNs="com.intellij">
-      <applicationService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"/>
-      <applicationService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"/>
-      <applicationService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor"/>
-      <applicationService serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder"/>
-    </extensions>
+  <extensions defaultExtensionNs="com.intellij">
+    <projectService
+            serviceInterface="dev.mcp.extensions.lsp.core.interfaces.HoverInfoProvider"
+            serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"/>
+    <projectService
+            serviceInterface="dev.mcp.extensions.lsp.core.interfaces.DefinitionFinder"
+            serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"/>
+    <projectService
+            serviceInterface="dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor"
+            serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor"/>
+    <projectService
+            serviceInterface="dev.mcp.extensions.lsp.core.interfaces.ReferenceFinder"
+            serviceImplementation="dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder"/>
+  </extensions>
 </idea-plugin>

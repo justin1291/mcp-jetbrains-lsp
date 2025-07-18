@@ -1,10 +1,10 @@
 package dev.mcp.extensions.lsp.core.factories
 
-import com.intellij.lang.Language
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiElement
 import dev.mcp.extensions.lsp.core.interfaces.ReferenceFinder
 import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils
 
 /**
  * Factory for creating language-specific reference finders.
@@ -13,7 +13,8 @@ import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
 object ReferenceFinderFactory {
     private val logger = Logger.getInstance(ReferenceFinderFactory::class.java)
 
-    private const val JAVA_REFERENCE_FINDER = "dev.mcp.extensions.lsp.languages.java.JavaReferenceFinder"
+    // **UPDATED**: Use improved JVM reference finder
+    private const val JVM_REFERENCE_FINDER = "dev.mcp.extensions.lsp.languages.jvm.JvmReferenceFinderImproved"
     private const val PYTHON_REFERENCE_FINDER = "dev.mcp.extensions.lsp.languages.python.PythonReferenceFinder"
     private const val JAVASCRIPT_REFERENCE_FINDER =
         "dev.mcp.extensions.lsp.languages.javascript.JavaScriptReferenceFinder"
@@ -35,17 +36,17 @@ object ReferenceFinderFactory {
 
         // Try to get language-specific service using dynamic loading
         val finder = when {
-            isJavaOrKotlin(language) -> {
-                logger.debug("Looking for Java/Kotlin reference finder service")
-                DynamicServiceLoader.loadReferenceFinder(JAVA_REFERENCE_FINDER)
+            LanguageUtils.isJvmLanguage(language) -> {
+                logger.info("Using JVM implementation for $languageId")
+                DynamicServiceLoader.loadReferenceFinder(JVM_REFERENCE_FINDER)
             }
 
-            isPython(language) -> {
+            LanguageUtils.isPython(language) -> {
                 logger.debug("Looking for Python reference finder service")
                 DynamicServiceLoader.loadReferenceFinder(PYTHON_REFERENCE_FINDER)
             }
 
-            isJavaScriptOrTypeScript(language) -> {
+            LanguageUtils.isJavaScriptOrTypeScript(language) -> {
                 logger.debug("Looking for JavaScript/TypeScript reference finder service")
                 DynamicServiceLoader.loadReferenceFinder(JAVASCRIPT_REFERENCE_FINDER)
             }
@@ -58,46 +59,10 @@ object ReferenceFinderFactory {
             return finder
         }
 
-        // Provide helpful error message based on language
-        val errorMessage = when {
-            isPython(language) -> {
-                "Python support is not available in this IDE. " +
-                        "Python is supported in PyCharm or IntelliJ IDEA Ultimate with the Python plugin installed."
-            }
-
-            isJavaOrKotlin(language) -> {
-                "Java/Kotlin support should be available but the service failed to load. " +
-                        "Please restart the IDE or reinstall the plugin."
-            }
-
-            isJavaScriptOrTypeScript(language) -> {
-                "JavaScript/TypeScript support is not available in this IDE. " +
-                        "JavaScript/TypeScript is supported in WebStorm or IntelliJ IDEA Ultimate with the JavaScript plugin installed."
-            }
-
-            else -> {
-                "Language not supported: $languageName (id: $languageId)"
-            }
-        }
+        // Use centralized error message generation
+        val errorMessage = LanguageUtils.getUnsupportedLanguageMessage(language)
 
         logger.warn("No reference finder available: $errorMessage")
         throw UnsupportedOperationException(errorMessage)
-    }
-
-    private fun isJavaOrKotlin(language: Language): Boolean {
-        val id = language.id
-        return id == "JAVA" || id == "kotlin" || id == "Kotlin"
-    }
-
-    private fun isPython(language: Language): Boolean {
-        val id = language.id
-        return id == "Python" || id == "PythonCore"
-    }
-
-    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
-        val id = language.id
-        return id == "JavaScript" || id == "TypeScript" ||
-                id == "JSX" || id == "TSX" ||
-                id == "ECMAScript 6"
     }
 }

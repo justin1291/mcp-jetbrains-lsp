@@ -31,6 +31,20 @@ interface ReferenceFinder {
     fun findTargetElement(project: Project, args: FindReferencesArgs): PsiElement?
     
     /**
+     * Find target element by position in file.
+     * 
+     * @param psiFile The file to search in
+     * @param position The position in the file
+     * @return The target element if found, null otherwise
+     */
+    fun findTargetElementByPosition(psiFile: com.intellij.psi.PsiFile, position: Int): PsiElement? {
+        val element = psiFile.findElementAt(position) ?: return null
+        // Try to resolve reference first
+        val reference = element.parent?.reference ?: element.reference
+        return reference?.resolve() ?: element
+    }
+    
+    /**
      * Create grouped result with insights from references.
      * 
      * @param references List of found references
@@ -56,6 +70,16 @@ interface ReferenceFinder {
      * @return true if this finder can handle the element
      */
     fun supportsElement(element: PsiElement): Boolean
+    
+    /**
+     * Check if this finder supports the given file type.
+     * 
+     * @param psiFile The PSI file to check
+     * @return true if this finder can handle the file
+     */
+    fun supportsFile(psiFile: com.intellij.psi.PsiFile): Boolean {
+        return supportsElement(psiFile)
+    }
     
     /**
      * Get the supported language name for logging/debugging.

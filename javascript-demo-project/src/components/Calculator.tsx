@@ -2,9 +2,9 @@
  * React component for performing calculations
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { CalculationService, CalculationResult } from '../services/CalculationService';
-import { MathOperation, MathConfig } from '../utils/mathUtils';
+import { MathOperation, MathConfig, DEFAULT_MATH_CONFIG } from '../utils/mathUtils';
 
 /**
  * Props for the Calculator component
@@ -31,6 +31,13 @@ interface CalculatorState {
 }
 
 /**
+ * Creates a complete MathConfig from partial configuration
+ */
+const createMathConfig = (partialConfig?: Partial<MathConfig>): MathConfig => {
+    return { ...DEFAULT_MATH_CONFIG, ...partialConfig };
+};
+
+/**
  * Calculator component for performing mathematical operations
  */
 export const Calculator: React.FC<CalculatorProps> = ({
@@ -38,8 +45,10 @@ export const Calculator: React.FC<CalculatorProps> = ({
     onCalculation,
     showHistory = true
 }) => {
-    const [calculationService] = useState(() => new CalculationService(initialConfig));
-    const [state, setState] = useState<CalculatorState>({
+    const completeConfig = useMemo(() => createMathConfig(initialConfig), [initialConfig]);
+    const [calculationService] = useState(() => new CalculationService(completeConfig));
+    
+    const [calculatorState, setCalculatorState] = useState<CalculatorState>({
         firstNumber: '',
         secondNumber: '',
         operation: MathOperation.ADD,
@@ -47,137 +56,144 @@ export const Calculator: React.FC<CalculatorProps> = ({
         isLoading: false,
         error: null
     });
-    const [history, setHistory] = useState<CalculationResult[]>([]);
+    
+    const [calculationHistory, setCalculationHistory] = useState<CalculationResult[]>([]);
 
-    /**
-     * Updates the calculation history from the service
-     */
-    const updateHistory = useCallback(() => {
+    const updateCalculationHistory = useCallback(() => {
         if (showHistory) {
-            setHistory(calculationService.getHistory(10)); // Show last 10 operations
+            const recentHistory = calculationService.getHistory(10);
+            setCalculationHistory(recentHistory);
         }
     }, [calculationService, showHistory]);
 
     useEffect(() => {
-        updateHistory();
-    }, [updateHistory]);
+        updateCalculationHistory();
+    }, [updateCalculationHistory]);
 
-    /**
-     * Handles input change for numbers
-     */
-    const handleNumberChange = useCallback((field: 'firstNumber' | 'secondNumber') => 
+    const createNumberChangeHandler = useCallback((fieldName: 'firstNumber' | 'secondNumber') => 
         (event: React.ChangeEvent<HTMLInputElement>) => {
-            setState(prev => ({
-                ...prev,
-                [field]: event.target.value,
+            const newValue = event.target.value;
+            setCalculatorState(previousState => ({
+                ...previousState,
+                [fieldName]: newValue,
                 error: null
             }));
         }, []
     );
 
-    /**
-     * Handles operation selection change
-     */
-    const handleOperationChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
-        setState(prev => ({
-            ...prev,
-            operation: event.target.value as MathOperation,
+    const handleOperationSelection = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        const selectedOperation = event.target.value as MathOperation;
+        setCalculatorState(previousState => ({
+            ...previousState,
+            operation: selectedOperation,
             error: null
         }));
     }, []);
 
-    /**
-     * Performs the calculation
-     */
-    const handleCalculate = useCallback(async () => {
-        const { firstNumber, secondNumber, operation } = state;
+    const executeCalculation = useCallback(async () => {
+        const { firstNumber, secondNumber, operation } = calculatorState;
         
-        const a = parseFloat(firstNumber);
-        const b = parseFloat(secondNumber);
+        const firstOperand = parseFloat(firstNumber);
+        const secondOperand = parseFloat(secondNumber);
 
-        if (isNaN(a) || isNaN(b)) {
-            setState(prev => ({
-                ...prev,
+        if (isNaN(firstOperand) || isNaN(secondOperand)) {
+            setCalculatorState(previousState => ({
+                ...previousState,
                 error: 'Please enter valid numbers'
             }));
             return;
         }
 
-        setState(prev => ({ ...prev, isLoading: true, error: null }));
+        setCalculatorState(previousState => ({ 
+            ...previousState, 
+            isLoading: true, 
+            error: null 
+        }));
 
         try {
-            const result = await calculationService.performCalculation(a, b, operation);
-            setState(prev => ({
-                ...prev,
-                result,
+            const calculationResult = await calculationService.performCalculation(
+                firstOperand, 
+                secondOperand, 
+                operation
+            );
+            
+            setCalculatorState(previousState => ({
+                ...previousState,
+                result: calculationResult,
                 isLoading: false
             }));
             
             if (onCalculation) {
-                onCalculation(result);
+                onCalculation(calculationResult);
             }
             
-            updateHistory();
-        } catch (error) {
-            setState(prev => ({
-                ...prev,
-                error: error instanceof Error ? error.message : 'Calculation failed',
+            updateCalculationHistory();
+        } catch (calculationError) {
+            const errorMessage = calculationError instanceof Error 
+                ? calculationError.message 
+                : 'Calculation failed';
+                
+            setCalculatorState(previousState => ({
+                ...previousState,
+                error: errorMessage,
                 isLoading: false
             }));
         }
-    }, [state, calculationService, onCalculation, updateHistory]);
+    }, [calculatorState, calculationService, onCalculation, updateCalculationHistory]);
 
-    /**
-     * Handles special operation buttons (circle area, factorial)
-     */
-    const handleSpecialOperation = useCallback(async (type: 'circle' | 'factorial') => {
-        const { firstNumber } = state;
-        const num = parseFloat(firstNumber);
+    const executeSpecialOperation = useCallback(async (operationType: 'circle' | 'factorial') => {
+        const { firstNumber } = calculatorState;
+        const operand = parseFloat(firstNumber);
 
-        if (isNaN(num)) {
-            setState(prev => ({
-                ...prev,
+        if (isNaN(operand)) {
+            setCalculatorState(previousState => ({
+                ...previousState,
                 error: 'Please enter a valid number'
             }));
             return;
         }
 
-        setState(prev => ({ ...prev, isLoading: true, error: null }));
+        setCalculatorState(previousState => ({ 
+            ...previousState, 
+            isLoading: true, 
+            error: null 
+        }));
 
         try {
-            let result: CalculationResult;
+            let operationResult: CalculationResult;
             
-            if (type === 'circle') {
-                result = calculationService.calculateCircleArea(num);
+            if (operationType === 'circle') {
+                operationResult = calculationService.calculateCircleArea(operand);
             } else {
-                result = calculationService.calculateFactorial(num);
+                operationResult = calculationService.calculateFactorial(operand);
             }
 
-            setState(prev => ({
-                ...prev,
-                result,
+            setCalculatorState(previousState => ({
+                ...previousState,
+                result: operationResult,
                 isLoading: false
             }));
 
             if (onCalculation) {
-                onCalculation(result);
+                onCalculation(operationResult);
             }
 
-            updateHistory();
-        } catch (error) {
-            setState(prev => ({
-                ...prev,
-                error: error instanceof Error ? error.message : 'Operation failed',
+            updateCalculationHistory();
+        } catch (operationError) {
+            const errorMessage = operationError instanceof Error 
+                ? operationError.message 
+                : 'Operation failed';
+                
+            setCalculatorState(previousState => ({
+                ...previousState,
+                error: errorMessage,
                 isLoading: false
             }));
         }
-    }, [state.firstNumber, calculationService, onCalculation, updateHistory]);
+    }, [calculatorState, calculationService, onCalculation, updateCalculationHistory]);
 
-    /**
-     * Clears the calculator
-     */
-    const handleClear = useCallback(() => {
-        setState({
+    const resetCalculator = useCallback(() => {
+        setCalculatorState({
             firstNumber: '',
             secondNumber: '',
             operation: MathOperation.ADD,
@@ -187,11 +203,8 @@ export const Calculator: React.FC<CalculatorProps> = ({
         });
     }, []);
 
-    /**
-     * Renders the operation history
-     */
-    const renderHistory = () => {
-        if (!showHistory || history.length === 0) {
+    const renderCalculationHistory = () => {
+        if (!showHistory || calculationHistory.length === 0) {
             return null;
         }
 
@@ -199,10 +212,10 @@ export const Calculator: React.FC<CalculatorProps> = ({
             <div className="calculator-history">
                 <h3>Recent Calculations</h3>
                 <ul>
-                    {history.map((item, index) => (
+                    {calculationHistory.map((historyItem, index) => (
                         <li key={index}>
-                            {item.operation} = {item.value}
-                            <small> ({item.timestamp.toLocaleTimeString()})</small>
+                            {historyItem.operation} = {historyItem.value}
+                            <small> ({historyItem.timestamp.toLocaleTimeString()})</small>
                         </li>
                     ))}
                 </ul>
@@ -210,7 +223,11 @@ export const Calculator: React.FC<CalculatorProps> = ({
         );
     };
 
-    const { firstNumber, secondNumber, operation, result, isLoading, error } = state;
+    const { firstNumber, secondNumber, operation, result, isLoading, error } = calculatorState;
+    const hasValidFirstNumber = firstNumber && !isNaN(parseFloat(firstNumber));
+    const hasValidSecondNumber = secondNumber && !isNaN(parseFloat(secondNumber));
+    const canPerformBasicCalculation = hasValidFirstNumber && hasValidSecondNumber;
+    const canPerformSpecialOperation = hasValidFirstNumber;
 
     return (
         <div className="calculator">
@@ -223,7 +240,7 @@ export const Calculator: React.FC<CalculatorProps> = ({
                         id="first-number"
                         type="number"
                         value={firstNumber}
-                        onChange={handleNumberChange('firstNumber')}
+                        onChange={createNumberChangeHandler('firstNumber')}
                         disabled={isLoading}
                     />
                 </div>
@@ -233,7 +250,7 @@ export const Calculator: React.FC<CalculatorProps> = ({
                     <select
                         id="operation"
                         value={operation}
-                        onChange={handleOperationChange}
+                        onChange={handleOperationSelection}
                         disabled={isLoading}
                     >
                         <option value={MathOperation.ADD}>Add (+)</option>
@@ -249,36 +266,36 @@ export const Calculator: React.FC<CalculatorProps> = ({
                         id="second-number"
                         type="number"
                         value={secondNumber}
-                        onChange={handleNumberChange('secondNumber')}
+                        onChange={createNumberChangeHandler('secondNumber')}
                         disabled={isLoading}
                     />
                 </div>
 
                 <div className="button-group">
                     <button 
-                        onClick={handleCalculate} 
-                        disabled={isLoading || !firstNumber || !secondNumber}
+                        onClick={executeCalculation} 
+                        disabled={isLoading || !canPerformBasicCalculation}
                     >
                         {isLoading ? 'Calculating...' : 'Calculate'}
                     </button>
                     
                     <button 
-                        onClick={() => handleSpecialOperation('circle')}
-                        disabled={isLoading || !firstNumber}
+                        onClick={() => executeSpecialOperation('circle')}
+                        disabled={isLoading || !canPerformSpecialOperation}
                         title="Calculate circle area using first number as radius"
                     >
                         Circle Area
                     </button>
                     
                     <button 
-                        onClick={() => handleSpecialOperation('factorial')}
-                        disabled={isLoading || !firstNumber}
+                        onClick={() => executeSpecialOperation('factorial')}
+                        disabled={isLoading || !canPerformSpecialOperation}
                         title="Calculate factorial of first number"
                     >
                         Factorial
                     </button>
                     
-                    <button onClick={handleClear} disabled={isLoading}>
+                    <button onClick={resetCalculator} disabled={isLoading}>
                         Clear
                     </button>
                 </div>
@@ -298,44 +315,9 @@ export const Calculator: React.FC<CalculatorProps> = ({
                 </div>
             )}
 
-            {renderHistory()}
+            {renderCalculationHistory()}
         </div>
     );
-};
-
-/**
- * Higher-order component that provides calculation statistics
- */
-export const withCalculationStats = <P extends object>(
-    Component: React.ComponentType<P>
-) => {
-    return (props: P & { calculationService?: CalculationService }) => {
-        const [stats, setStats] = useState({ totalOperations: 0, operationTypes: {}, averageValue: 0 });
-        const service = props.calculationService || new CalculationService();
-
-        useEffect(() => {
-            const updateStats = () => {
-                setStats(service.getStatistics());
-            };
-
-            // Update stats every 5 seconds
-            const interval = setInterval(updateStats, 5000);
-            updateStats(); // Initial update
-
-            return () => clearInterval(interval);
-        }, [service]);
-
-        return (
-            <div>
-                <div className="calculation-stats">
-                    <h4>Statistics</h4>
-                    <p>Total Operations: {stats.totalOperations}</p>
-                    <p>Average Value: {stats.averageValue.toFixed(2)}</p>
-                </div>
-                <Component {...props} />
-            </div>
-        );
-    };
 };
 
 export default Calculator;

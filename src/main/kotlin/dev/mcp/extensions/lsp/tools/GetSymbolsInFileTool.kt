@@ -73,6 +73,9 @@ Supported: ${SymbolExtractorFactory.getSupportedLanguages().joinToString(", ")}"
                     } catch (e: UnsupportedOperationException) {
                         logger.error("Unsupported file type", e)
                         return@measureOperation Response(null, e.message)
+                    } catch (e: Exception) {
+                        logger.error("Error getting extractor", e)
+                        return@measureOperation Response(null, "Error getting extractor: ${e.message}")
                     }
 
                     logger.debug("Using extractor: ${extractor.getSupportedLanguage()}")

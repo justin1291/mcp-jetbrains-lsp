@@ -18,6 +18,17 @@ interface HoverInfoProvider {
     fun getHoverInfo(element: PsiElement): HoverInfo
     
     /**
+     * Get hover information for an element using args.
+     * 
+     * @param psiFile The file containing the element
+     * @param args Arguments specifying the position
+     * @return HoverInfo containing type, documentation, and other metadata
+     */
+    fun getHoverInfo(psiFile: PsiFile, args: dev.mcp.extensions.lsp.core.models.GetHoverArgs): HoverInfo? {
+        return getHoverInfoAtPosition(psiFile, args.position)
+    }
+    
+    /**
      * Find element at position and get hover info.
      * 
      * @param psiFile The file to search in
@@ -33,6 +44,16 @@ interface HoverInfoProvider {
      * @return true if this provider can handle the element
      */
     fun supportsElement(element: PsiElement): Boolean
+    
+    /**
+     * Check if this provider supports the given file type.
+     * 
+     * @param psiFile The PSI file to check
+     * @return true if this provider can handle the file
+     */
+    fun supportsFile(psiFile: PsiFile): Boolean {
+        return supportsElement(psiFile)
+    }
     
     /**
      * Get the supported language name for logging/debugging.

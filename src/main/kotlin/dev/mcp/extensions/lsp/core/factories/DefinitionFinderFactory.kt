@@ -2,10 +2,12 @@ package dev.mcp.extensions.lsp.core.factories
 
 import com.intellij.lang.Language
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import dev.mcp.extensions.lsp.core.interfaces.DefinitionFinder
 import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils.isJavaScriptOrTypeScript
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils.isJvmLanguage
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils.isPython
 
 /**
  * Factory for creating language-specific definition finders.
@@ -14,7 +16,8 @@ import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
 object DefinitionFinderFactory {
     private val logger = Logger.getInstance(DefinitionFinderFactory::class.java)
 
-    private const val JAVA_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.java.JavaDefinitionFinder"
+    // **UPDATED**: Use improved JVM definition finder
+    private const val JVM_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.jvm.JvmDefinitionFinderImproved"
     private const val PYTHON_DEFINITION_FINDER = "dev.mcp.extensions.lsp.languages.python.PythonDefinitionFinder"
     private const val JAVASCRIPT_DEFINITION_FINDER =
         "dev.mcp.extensions.lsp.languages.javascript.JavaScriptDefinitionFinder"
@@ -31,18 +34,6 @@ object DefinitionFinderFactory {
         return getFinderForLanguage(language)
     }
 
-    /**
-     * Get the appropriate definition finder for a given element.
-     *
-     * @param element The PSI element to get a finder for
-     * @return DefinitionFinder implementation for the element's language
-     * @throws UnsupportedOperationException if the language is not supported
-     */
-    fun getFinder(element: PsiElement): DefinitionFinder {
-        val language = element.language
-        return getFinderForLanguage(language)
-    }
-
     private fun getFinderForLanguage(language: Language): DefinitionFinder {
         val languageId = language.id
         val languageName = language.displayName
@@ -51,13 +42,18 @@ object DefinitionFinderFactory {
 
         // Try to get language-specific service
         val finder = when {
-            isJavaOrKotlin(language) -> {
-                logger.debug("Looking for Java/Kotlin definition finder service")
+            isJvmLanguage(language) -> {
+                logger.info("Using improved JVM implementation for $languageId")
                 try {
-                    DynamicServiceLoader.loadDefinitionFinder(JAVA_DEFINITION_FINDER)
+                    DynamicServiceLoader.loadDefinitionFinder(JVM_DEFINITION_FINDER)
                 } catch (e: Exception) {
-                    logger.debug("Java definition finder service not available: ${e.message}")
-                    null
+                    logger.error("Failed to load improved JVM finder, falling back to original: ${e.message}")
+                    try {
+                        DynamicServiceLoader.loadDefinitionFinder("dev.mcp.extensions.lsp.languages.jvm.JvmDefinitionFinder")
+                    } catch (fallbackError: Exception) {
+                        logger.error("Failed to load original JVM finder: ${fallbackError.message}")
+                        null
+                    }
                 }
             }
 
@@ -96,8 +92,8 @@ object DefinitionFinderFactory {
                         "Python is supported in PyCharm or IntelliJ IDEA Ultimate with the Python plugin installed."
             }
 
-            isJavaOrKotlin(language) -> {
-                "Java/Kotlin support should be available but the service failed to load. " +
+            isJvmLanguage(language) -> {
+                "JVM language support should be available but the service failed to load. " +
                         "Please restart the IDE or reinstall the plugin."
             }
 
@@ -115,20 +111,4 @@ object DefinitionFinderFactory {
         throw UnsupportedOperationException(errorMessage)
     }
 
-    private fun isJavaOrKotlin(language: Language): Boolean {
-        val id = language.id
-        return id == "JAVA" || id == "kotlin" || id == "Kotlin"
-    }
-
-    private fun isPython(language: Language): Boolean {
-        val id = language.id
-        return id == "Python" || id == "PythonCore"
-    }
-
-    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
-        val id = language.id
-        return id == "JavaScript" || id == "TypeScript" ||
-                id == "JSX" || id == "TSX" ||
-                id == "ECMAScript 6"
-    }
 }

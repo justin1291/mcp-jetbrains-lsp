@@ -105,7 +105,10 @@ export class CalculationService {
             this.operationHistory.push(result);
             return result;
         } catch (error) {
-            throw new Error(`Factorial calculation failed: ${error.message}`);
+            const errorMessage = error instanceof Error 
+                ? error.message 
+                : 'Factorial calculation failed';
+            throw new Error(`Factorial calculation failed: ${errorMessage}`);
         }
     }
 

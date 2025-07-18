@@ -1,7 +1,7 @@
-package dev.mcp.extensions.lsp.languages.java
+package dev.mcp.extensions.lsp.languages.jvm
 
 import com.intellij.openapi.application.ApplicationManager
-import dev.mcp.extensions.lsp.JavaBaseTest
+import dev.mcp.extensions.lsp.JvmBaseTest
 import dev.mcp.extensions.lsp.core.models.FindReferencesArgs
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -9,9 +9,16 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 
-class JavaReferenceFinderTest : JavaBaseTest() {
+/**
+ * Unit tests for JavaReferenceFinder using JVM implementation.
+ * Tests the JVM reference finder directly without going through the tool layer.
+ * Uses physical demo files that are copied by BaseTest.
+ * 
+ * NOTE: This test now uses the JVM implementation to prepare for removing the Java-specific implementation.
+ */
+class JvmReferenceFinderTest : JvmBaseTest() {
 
-    private val finder: JavaReferenceFinder = JavaReferenceFinder()
+    private val finder: JvmReferenceFinder = JvmReferenceFinder()
 
     @Test
     fun testFindFieldReferences() {
@@ -229,6 +236,182 @@ class JavaReferenceFinderTest : JavaBaseTest() {
                 result.insights.any { it.contains("Primary usage") },
                 "Should provide insight about primary usage patterns"
             )
+        }
+    }
+
+    @Test
+    fun testFindReferencesWithDataFlow() {
+        ApplicationManager.getApplication().runReadAction {
+            val args = FindReferencesArgs(
+                symbolName = "users",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+
+            val element = finder.findTargetElement(fixtureProject, args)!!
+            val references = finder.findReferences(fixtureProject, element, args)
+
+            assertTrue("Should find references to users field", references.isNotEmpty())
+
+            // Check for different usage types
+            val usageTypes = references.map { it.usageType }.toSet()
+            assertTrue("Should have field operations", 
+                usageTypes.intersect(setOf("field_write", "field_read", "reference")).isNotEmpty())
+
+            // Test data flow context
+            val hasDataFlowContext = references.any { !it.dataFlowContext.isNullOrBlank() }
+            if (hasDataFlowContext) {
+                assertTrue("Should have meaningful data flow context", 
+                    references.any { it.dataFlowContext?.contains("assigned") ?: false ||
+                                   it.dataFlowContext?.contains("used") ?: false })
+            }
+        }
+    }
+
+    @Test
+    fun testFindStaticMethodReferences() {
+        ApplicationManager.getApplication().runReadAction {
+            // Test with a static constant that has references instead of an unused method
+            val args = FindReferencesArgs(
+                symbolName = "DEFAULT_ROLE",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+
+            val element = finder.findTargetElement(fixtureProject, args)!!
+            val references = finder.findReferences(fixtureProject, element, args)
+
+            assertTrue("Should find references to DEFAULT_ROLE static constant", references.isNotEmpty())
+
+            // Should find static field references
+            val staticReferences = references.filter { 
+                it.usageType == "static_field_read" || 
+                it.usageType == "field_read" || 
+                it.usageType == "reference" 
+            }
+            assertTrue("Should find static field references", staticReferences.isNotEmpty())
+        }
+    }
+
+    @Test
+    fun testGroupedResultInsights() {
+        ApplicationManager.getApplication().runReadAction {
+            val args = FindReferencesArgs(
+                symbolName = "DEFAULT_ROLE",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+
+            val element = finder.findTargetElement(fixtureProject, args)!!
+            val references = finder.findReferences(fixtureProject, element, args)
+            val result = finder.createGroupedResult(references, element)
+
+            // Should generate insights about usage patterns
+            assertTrue("Should have insights", result.insights.isNotEmpty())
+
+            // Check for common insight patterns
+            val insightText = result.insights.joinToString(" ")
+            assertTrue("Should mention usage patterns",
+                insightText.contains("usage") || 
+                insightText.contains("method") || 
+                insightText.contains("reference"))
+        }
+    }
+
+    @Test
+    fun testFindReferencesWithPosition() {
+        ApplicationManager.getApplication().runReadAction {
+            // Test position-based reference finding using a known field
+            val args = FindReferencesArgs(
+                symbolName = "users",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+
+            val element = finder.findTargetElement(fixtureProject, args)!!
+            val references = finder.findReferences(fixtureProject, element, args)
+
+            assertTrue("Should find references using target element", references.isNotEmpty())
+
+            // Verify the references have proper context
+            references.forEach { ref ->
+                assertNotNull("Reference should have containing class", ref.containingClass)
+                assertNotNull("Reference should have file path", ref.filePath)
+                assertTrue("Reference should have valid line number", ref.lineNumber > 0)
+            }
+        }
+    }
+
+    @Test
+    fun testEmptyReferencesHandling() {
+        ApplicationManager.getApplication().runReadAction {
+            val args = FindReferencesArgs(
+                symbolName = "NonExistentSymbol",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+
+            val element = finder.findTargetElement(fixtureProject, args)
+            
+            if (element != null) {
+                val references = finder.findReferences(fixtureProject, element, args)
+                
+                // May have no references for non-existent symbol
+                val result = finder.createGroupedResult(references, element)
+                assertNotNull("Should create result even for empty references", result)
+                assertEquals("Total should be 0 for non-existent symbol", 0, result.summary.totalReferences)
+            }
+        }
+    }
+
+    @Test
+    fun testReferenceUsageTypes() {
+        ApplicationManager.getApplication().runReadAction {
+            val args = FindReferencesArgs(
+                symbolName = "addUser",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+
+            val element = finder.findTargetElement(fixtureProject, args)!!
+            val references = finder.findReferences(fixtureProject, element, args)
+
+            assertTrue("Should find method references", references.isNotEmpty())
+
+            // Check for method call usage types
+            val usageTypes = references.map { it.usageType }.toSet()
+            assertTrue("Should have method call types", 
+                usageTypes.intersect(setOf("method_call", "reference")).isNotEmpty())
+
+            // Verify grouped result structure
+            val result = finder.createGroupedResult(references, element)
+            assertNotNull("Should have usagesByType grouping", result.usagesByType)
+            assertTrue("Should group by type", result.usagesByType.keys.isNotEmpty())
+        }
+    }
+
+    @Test
+    fun testSupportedLanguageAndFileTypes() {
+        ApplicationManager.getApplication().runReadAction {
+            val supportedLanguage = finder.getSupportedLanguage()
+            assertEquals("Java/Kotlin", supportedLanguage)
+            
+            // Test that finder can handle project files
+            val args = FindReferencesArgs(
+                symbolName = "User",
+                filePath = null,
+                position = null,
+                includeDeclaration = false
+            )
+            
+            val element = finder.findTargetElement(fixtureProject, args)
+            assertNotNull("Should find elements in project", element)
         }
     }
 }

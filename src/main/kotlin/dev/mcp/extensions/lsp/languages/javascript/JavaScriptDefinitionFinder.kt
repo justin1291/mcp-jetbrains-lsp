@@ -1,739 +1,503 @@
 package dev.mcp.extensions.lsp.languages.javascript
 
-import com.intellij.lang.javascript.psi.*
-import com.intellij.lang.javascript.psi.ecmal4.JSAttributeListOwner
-import com.intellij.lang.javascript.psi.ecmal4.JSClass
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
-import com.intellij.psi.PsiReference
-import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.PsiNamedElement
 import dev.mcp.extensions.lsp.core.interfaces.DefinitionFinder
 import dev.mcp.extensions.lsp.core.models.DefinitionLocation
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils
 import dev.mcp.extensions.lsp.languages.base.BaseLanguageHandler
 
 /**
- * Definition finder implementation for JavaScript and TypeScript languages.
- *
- * Handles navigation to definitions for:
- * - Functions and methods
- * - Classes and constructors
- * - Variables and constants
- * - React components and hooks
+ * JavaScript/TypeScript definition finder with support for:
+ * - ES6 modules (import/export)
+ * - CommonJS modules (require/module.exports)
+ * - Function declarations and expressions
+ * - Class definitions
+ * - Variable declarations (var, let, const)
+ * - Object properties and methods
+ * - TypeScript interfaces and types
  */
+@Service
 class JavaScriptDefinitionFinder : BaseLanguageHandler(), DefinitionFinder {
 
     override fun findDefinitionByPosition(psiFile: PsiFile, position: Int): List<DefinitionLocation> {
-        // Validate PSI file and position
-        if (psiFile.virtualFile == null) {
+        if (psiFile.virtualFile == null || position < 0 || position >= psiFile.textLength) {
             return emptyList()
         }
 
-        if (position < 0 || position >= psiFile.textLength) {
+        try {
+            // Find element at position with better context handling
+            val elementAtPosition = findElementAtPositionWithContext(psiFile, position)
+            if (elementAtPosition != null) {
+                // Try reference resolution first (most common case)
+                val referenceResult = resolveReferenceAtElement(elementAtPosition)
+                if (referenceResult.isNotEmpty()) return referenceResult
+
+                // Try finding declaration in containing elements
+                val declarationResult = findDeclarationAtPosition(elementAtPosition)
+                if (declarationResult.isNotEmpty()) return declarationResult
+            }
+
+            // Fallback: search in nearby positions
+            return findDefinitionWithFallback(psiFile, position)
+
+        } catch (e: Exception) {
+            logger.warn("Error finding definition at position $position in ${psiFile.name}: ${e.message}")
             return emptyList()
         }
-
-        val element = psiFile.findElementAt(position) ?: return emptyList()
-
-        // Priority 1: Handle React components and hooks with higher priority
-        val reactResult = resolveReactDefinition(element)
-        if (reactResult.isNotEmpty()) {
-            return reactResult
-        }
-
-        // Priority 2: Standard reference resolution
-        val reference = findReference(element)
-        if (reference != null) {
-            val resolved = reference.resolve()
-            if (resolved != null) {
-                // Filter out CSS classes when JavaScript symbols are available
-                if (isJavaScriptSymbol(resolved)) {
-                    val location = createLocationSafely(resolved, element.text)
-                    return if (location != null) listOf(location) else emptyList()
-                }
-            }
-        }
-
-        // Priority 3: Fallback to element-based resolution
-        return findDefinitionByElement(element)
-    }
-
-    /**
-     * Resolve React components, hooks, and higher-order functions
-     */
-    private fun resolveReactDefinition(element: PsiElement): List<DefinitionLocation> {
-        try {
-            // Handle React hooks
-            val hookResult = resolveReactHook(element)
-            if (hookResult.isNotEmpty()) {
-                return hookResult
-            }
-
-            // Handle React components
-            val componentResult = resolveReactComponent(element)
-            if (componentResult.isNotEmpty()) {
-                return componentResult
-            }
-
-            // Handle higher-order components and callback functions
-            val hocResult = resolveHigherOrderFunction(element)
-            if (hocResult.isNotEmpty()) {
-                return hocResult
-            }
-
-            // Handle JSX elements
-            val jsxResult = resolveJSXElement(element)
-            if (jsxResult.isNotEmpty()) {
-                return jsxResult
-            }
-        } catch (e: Exception) {
-            logger.debug("Error resolving React definition", e)
-        }
-
-        return emptyList()
-    }
-
-    private fun resolveReactHook(element: PsiElement): List<DefinitionLocation> {
-        try {
-            // Check if element is a React hook call
-            val callExpression = PsiTreeUtil.getParentOfType(element, JSCallExpression::class.java)
-            if (callExpression != null) {
-                val methodExpression = callExpression.methodExpression
-                if (methodExpression is JSReferenceExpression) {
-                    val referencedName = methodExpression.referencedName
-                    if (referencedName != null && isReactHookName(referencedName)) {
-                        // Try to resolve the hook definition
-                        val reference = methodExpression.reference
-                        if (reference != null) {
-                            val resolved = reference.resolve()
-                            if (resolved != null) {
-                                val location = createLocationSafely(resolved, referencedName)
-                                return if (location != null) {
-                                    listOf(location.copy(
-                                        confidence = 1.0f,
-                                        disambiguationHint = "React Hook"
-                                    ))
-                                } else emptyList()
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Check if element is a custom hook definition
-            val function = PsiTreeUtil.getParentOfType(element, JSFunction::class.java)
-            if (function != null && function.name != null && isReactHookName(function.name!!)) {
-                val location = createLocationSafely(function, function.name)
-                return if (location != null) {
-                    listOf(location.copy(
-                        confidence = 1.0f,
-                        disambiguationHint = "Custom React Hook"
-                    ))
-                } else emptyList()
-            }
-        } catch (e: Exception) {
-            logger.debug("Error resolving React hook", e)
-        }
-
-        return emptyList()
-    }
-
-    private fun resolveReactComponent(element: PsiElement): List<DefinitionLocation> {
-        try {
-            // Check if element is a React component reference
-            val reference = element.reference
-            if (reference != null) {
-                val resolved = reference.resolve()
-                if (resolved != null && isReactComponentElement(resolved)) {
-                    val location = createLocationSafely(resolved, element.text)
-                    return if (location != null) {
-                        listOf(location.copy(
-                            confidence = 1.0f,
-                            disambiguationHint = "React Component"
-                        ))
-                    } else emptyList()
-                }
-            }
-
-            // Check if element is part of a component definition
-            val componentElement = findComponentDefinition(element)
-            if (componentElement != null) {
-                val location = createLocationSafely(componentElement, element.text)
-                return if (location != null) {
-                    listOf(location.copy(
-                        confidence = 1.0f,
-                        disambiguationHint = "React Component Definition"
-                    ))
-                } else emptyList()
-            }
-        } catch (e: Exception) {
-            logger.debug("Error resolving React component", e)
-        }
-
-        return emptyList()
-    }
-
-    private fun resolveHigherOrderFunction(element: PsiElement): List<DefinitionLocation> {
-        try {
-            // Check if element is part of a higher-order function pattern
-            val callExpression = PsiTreeUtil.getParentOfType(element, JSCallExpression::class.java)
-            if (callExpression != null) {
-                val methodExpression = callExpression.methodExpression
-
-                // Handle HOC patterns like withRouter(Component)
-                if (methodExpression is JSReferenceExpression) {
-                    val referencedName = methodExpression.referencedName
-                    if (referencedName != null && isHigherOrderFunctionName(referencedName)) {
-                        val reference = methodExpression.reference
-                        if (reference != null) {
-                            val resolved = reference.resolve()
-                            if (resolved != null) {
-                                val location = createLocationSafely(resolved, referencedName)
-                                return if (location != null) {
-                                    listOf(location.copy(
-                                        confidence = 1.0f,
-                                        disambiguationHint = "Higher-Order Function"
-                                    ))
-                                } else emptyList()
-                            }
-                        }
-                    }
-                }
-
-                // Handle callback functions in arguments
-                val arguments = callExpression.arguments
-                for (arg in arguments) {
-                    if (arg.textRange.contains(element.textRange)) {
-                        if (arg is JSFunction) {
-                            val location = createLocationSafely(arg, "callback")
-                            return if (location != null) {
-                                listOf(location.copy(
-                                    confidence = 0.9f,
-                                    disambiguationHint = "Callback Function"
-                                ))
-                            } else emptyList()
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            logger.debug("Error resolving higher-order function", e)
-        }
-
-        return emptyList()
-    }
-
-    private fun resolveJSXElement(element: PsiElement): List<DefinitionLocation> {
-        try {
-            // Check if element is a JSX tag using a more generic approach
-            val parent = element.parent
-            if (parent != null && parent.javaClass.simpleName.contains("JSX")) {
-                // Try to get the tag name from the parent element
-                val tagName = parent.text?.split("<", ">", " ")?.getOrNull(1)?.trim()
-                if (tagName != null && isReactComponentName(tagName)) {
-                    // Try to resolve the component definition
-                    val reference = parent.reference
-                    if (reference != null) {
-                        val resolved = reference.resolve()
-                        if (resolved != null) {
-                            val location = createLocationSafely(resolved, tagName)
-                            return if (location != null) {
-                                listOf(location.copy(
-                                    confidence = 1.0f,
-                                    disambiguationHint = "JSX Component"
-                                ))
-                            } else emptyList()
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            logger.debug("Error resolving JSX element", e)
-        }
-
-        return emptyList()
-    }
-
-    private fun isJavaScriptSymbol(element: PsiElement): Boolean {
-        return element is JSFunction ||
-               element is JSClass ||
-               element is JSVariable ||
-               element is JSField ||
-               element is JSProperty
-    }
-
-    private fun isReactHookName(name: String): Boolean {
-        return name.startsWith("use") && name.length > 3 && name[3].isUpperCase()
-    }
-
-    private fun isReactComponentName(name: String): Boolean {
-        return name.isNotEmpty() && name[0].isUpperCase()
-    }
-
-    private fun isReactComponentElement(element: PsiElement): Boolean {
-        return when (element) {
-            is JSFunction -> {
-                val name = element.name
-                name != null && isReactComponentName(name)
-            }
-            is JSClass -> {
-                val name = element.name
-                name != null && isReactComponentName(name)
-            }
-            is JSVariable -> {
-                val name = element.name
-                name != null && isReactComponentName(name) &&
-                element.initializer is JSFunction
-            }
-            else -> false
-        }
-    }
-
-    private fun findComponentDefinition(element: PsiElement): PsiElement? {
-        // Look for React component patterns
-        val function = PsiTreeUtil.getParentOfType(element, JSFunction::class.java)
-        if (function != null && function.name != null && isReactComponentName(function.name!!)) {
-            return function
-        }
-
-        val variable = PsiTreeUtil.getParentOfType(element, JSVariable::class.java)
-        if (variable != null && variable.name != null && isReactComponentName(variable.name!!)) {
-            return variable
-        }
-
-        val jsClass = PsiTreeUtil.getParentOfType(element, JSClass::class.java)
-        if (jsClass != null && jsClass.name != null && isReactComponentName(jsClass.name!!)) {
-            return jsClass
-        }
-
-        return null
-    }
-
-    private fun isHigherOrderFunctionName(name: String): Boolean {
-        return name.startsWith("with") || // withRouter, withStyles
-               name.startsWith("connect") || // Redux connect
-               name.startsWith("memo") || // React.memo
-               name.startsWith("forwardRef") || // React.forwardRef
-               name.startsWith("enhance") || // General HOC pattern
-               name.endsWith("HOC") || // Explicit HOC naming
-               name.endsWith("Hoc")
     }
 
     override fun findDefinitionByName(project: Project, symbolName: String): List<DefinitionLocation> {
-        val definitions = mutableListOf<DefinitionLocation>()
+        if (symbolName.isBlank()) return emptyList()
 
-        // Enhanced implementation with prioritization
         try {
-            // Priority 1: Look for React components and hooks first
-            if (isReactComponentName(symbolName)) {
-                val reactDefinitions = searchReactComponents(project, symbolName)
-                definitions.addAll(reactDefinitions)
+            val projectScope = com.intellij.psi.search.GlobalSearchScope.projectScope(project)
+            val allScope = com.intellij.psi.search.GlobalSearchScope.allScope(project)
+            val definitions = mutableListOf<DefinitionLocation>()
+
+            // Handle qualified names (e.g., "object.method")
+            val parts = symbolName.split(".")
+            if (parts.size >= 2) {
+                searchQualifiedSymbol(project, parts, projectScope, definitions, isProjectScope = true)
+                searchQualifiedSymbol(project, parts, allScope, definitions, isProjectScope = false)
+            } else {
+                // Simple name search
+                searchSimpleSymbol(project, symbolName, projectScope, definitions, isProjectScope = true)
+                searchSimpleSymbol(project, symbolName, allScope, definitions, isProjectScope = false)
             }
 
-            if (isReactHookName(symbolName)) {
-                val hookDefinitions = searchReactHooks(project, symbolName)
-                definitions.addAll(hookDefinitions)
-            }
-
-            // Priority 2: Look for regular JavaScript symbols
-            val jsDefinitions = searchJavaScriptSymbols(project, symbolName)
-            definitions.addAll(jsDefinitions)
-
-            // Sort by confidence and prioritize JavaScript symbols over CSS
-            definitions.sortByDescending { it.confidence }
+            return definitions.sortedByDescending { it.confidence }
 
         } catch (e: Exception) {
-            logger.error("Error finding definitions by name", e)
+            logger.warn("Error finding definition by name '$symbolName': ${e.message}")
+            return emptyList()
         }
-
-        return definitions
     }
 
-    private fun searchReactComponents(project: Project, symbolName: String): List<DefinitionLocation> {
-        // Implementation would use PsiSearchHelper to find React components
-        return emptyList()
-    }
-
-    private fun searchReactHooks(project: Project, symbolName: String): List<DefinitionLocation> {
-        // Implementation would use PsiSearchHelper to find React hooks
-        return emptyList()
-    }
-
-    private fun searchJavaScriptSymbols(project: Project, symbolName: String): List<DefinitionLocation> {
-        // Implementation would use PsiSearchHelper to find JavaScript symbols
-        return emptyList()
-    }
-
-    override fun createLocation(element: PsiElement, searchTerm: String?): DefinitionLocation {
-        val location = createLocationSafely(element, searchTerm)
-        return location ?: throw IllegalStateException("Failed to create location for element: $element")
-    }
-
-    /**
-     * Create a DefinitionLocation from a PSI element with comprehensive null safety.
-     * Returns null if the element cannot be safely processed.
-     */
-    private fun createLocationSafely(element: PsiElement, searchTerm: String? = null): DefinitionLocation? {
+    private fun findElementAtPositionWithContext(psiFile: PsiFile, position: Int): PsiElement? {
         try {
-            // Validate essential element properties
+            // Try the exact position first
+            var element = psiFile.findElementAt(position)
+            if (element != null && element.text.isNotBlank()) {
+                return element
+            }
+
+            // Try nearby positions to handle whitespace and edge cases
+            for (offset in 1..3) {
+                // Try before
+                if (position - offset >= 0) {
+                    element = psiFile.findElementAt(position - offset)
+                    if (element != null && element.text.isNotBlank()) {
+                        return element
+                    }
+                }
+                
+                // Try after
+                if (position + offset < psiFile.textLength) {
+                    element = psiFile.findElementAt(position + offset)
+                    if (element != null && element.text.isNotBlank()) {
+                        return element
+                    }
+                }
+            }
+
+            return null
+        } catch (e: Exception) {
+            logger.debug("Error finding element at position: ${e.message}")
+            return null
+        }
+    }
+
+    private fun resolveReferenceAtElement(element: PsiElement): List<DefinitionLocation> {
+        try {
+            // Try parent reference first
+            val parentReference = element.parent?.reference
+            if (parentReference != null) {
+                val resolved = parentReference.resolve()
+                if (resolved != null) {
+                    val location = createJavaScriptLocation(resolved)
+                    if (location != null) {
+                        return listOf(location.copy(confidence = 1.0f))
+                    }
+                }
+            }
+
+            // Try direct reference
+            val directReference = element.reference
+            if (directReference != null) {
+                val resolved = directReference.resolve()
+                if (resolved != null) {
+                    val location = createJavaScriptLocation(resolved)
+                    if (location != null) {
+                        return listOf(location.copy(confidence = 1.0f))
+                    }
+                }
+            }
+
+        } catch (e: Exception) {
+            logger.debug("Error resolving reference: ${e.message}")
+        }
+        return emptyList()
+    }
+
+    private fun findDeclarationAtPosition(element: PsiElement): List<DefinitionLocation> {
+        try {
+            // Look for containing function, class, or variable declaration
+            var parent = element.parent
+            while (parent != null) {
+                val location = when {
+                    isJavaScriptFunction(parent) -> createJavaScriptLocation(parent)
+                    isJavaScriptClass(parent) -> createJavaScriptLocation(parent)
+                    isJavaScriptVariable(parent) -> createJavaScriptLocation(parent)
+                    isTypeScriptInterface(parent) -> createJavaScriptLocation(parent)
+                    else -> null
+                }
+                
+                if (location != null) {
+                    return listOf(location.copy(confidence = 0.8f))
+                }
+                parent = parent.parent
+            }
+        } catch (e: Exception) {
+            logger.debug("Error finding declaration: ${e.message}")
+        }
+        return emptyList()
+    }
+
+    private fun findDefinitionWithFallback(psiFile: PsiFile, position: Int): List<DefinitionLocation> {
+        try {
+            // Search in nearby positions (-5 to +5 characters)
+            for (offset in -5..5) {
+                val adjustedPosition = position + offset
+                if (adjustedPosition >= 0 && adjustedPosition < psiFile.textLength) {
+                    val element = psiFile.findElementAt(adjustedPosition)
+                    if (element != null) {
+                        val result = resolveReferenceAtElement(element)
+                        if (result.isNotEmpty()) {
+                            return result.map {
+                                it.copy(
+                                    confidence = it.confidence * 0.8f,
+                                    disambiguationHint = "Near search: ${it.disambiguationHint ?: "Found nearby"}"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug("Error in fallback search: ${e.message}")
+        }
+        return emptyList()
+    }
+
+    private fun searchQualifiedSymbol(
+        project: Project,
+        parts: List<String>,
+        scope: com.intellij.psi.search.GlobalSearchScope,
+        definitions: MutableList<DefinitionLocation>,
+        isProjectScope: Boolean
+    ) {
+        try {
+            // Search for files that might contain the symbol
+            val searchService = com.intellij.psi.search.PsiSearchHelper.getInstance(project)
+            
+            // Search for each part of the qualified name
+            parts.forEach { part ->
+                searchService.processElementsWithWord(
+                    { element, _ ->
+                        if (LanguageUtils.isJavaScriptOrTypeScript(element.language)) {
+                            val location = createJavaScriptLocation(element)
+                            if (location != null && location.name.contains(part)) {
+                                definitions.add(
+                                    location.copy(
+                                        confidence = calculateJavaScriptConfidence(element, parts.joinToString(".")) *
+                                            if (isProjectScope) 1.0f else 0.7f
+                                    )
+                                )
+                            }
+                        }
+                        true
+                    },
+                    scope,
+                    parts.last(),
+                    com.intellij.psi.search.UsageSearchContext.ANY,
+                    true
+                )
+            }
+        } catch (e: Exception) {
+            logger.debug("Error searching qualified symbol: ${e.message}")
+        }
+    }
+
+    private fun searchSimpleSymbol(
+        project: Project,
+        symbolName: String,
+        scope: com.intellij.psi.search.GlobalSearchScope,
+        definitions: MutableList<DefinitionLocation>,
+        isProjectScope: Boolean
+    ) {
+        try {
+            val searchService = com.intellij.psi.search.PsiSearchHelper.getInstance(project)
+            
+            searchService.processElementsWithWord(
+                { element, _ ->
+                    if (LanguageUtils.isJavaScriptOrTypeScript(element.language)) {
+                        if (isJavaScriptDefinitionElement(element) && 
+                            (getElementName(element) == symbolName || element.text.contains(symbolName))) {
+                            val location = createJavaScriptLocation(element)
+                            if (location != null) {
+                                definitions.add(
+                                    location.copy(
+                                        confidence = calculateJavaScriptConfidence(element, symbolName) *
+                                            if (isProjectScope) 1.0f else 0.7f
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    true
+                },
+                scope,
+                symbolName,
+                com.intellij.psi.search.UsageSearchContext.ANY,
+                true
+            )
+        } catch (e: Exception) {
+            logger.debug("Error searching simple symbol: ${e.message}")
+        }
+    }
+
+    private fun createJavaScriptLocation(element: PsiElement): DefinitionLocation? {
+        try {
             val containingFile = element.containingFile ?: return null
             val virtualFile = containingFile.virtualFile ?: return null
             val project = element.project
-            val basePath = project.basePath ?: return null
-
-            // Get text range safely
             val textRange = element.textRange ?: return null
-            val startOffset = textRange.startOffset
-            val endOffset = textRange.endOffset
 
-            // Calculate relative path safely
+            // Safe path calculation
+            val basePath = project.basePath ?: ""
             val relativePath = try {
                 virtualFile.path.removePrefix(basePath).removePrefix("/")
             } catch (e: Exception) {
                 virtualFile.name
             }
 
-            // Calculate line number safely
+            // Safe line number calculation
             val lineNumber = try {
-                val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
-                    .getDocument(virtualFile)
-                document?.getLineNumber(startOffset)?.plus(1) ?: 1
+                val document = com.intellij.psi.PsiDocumentManager.getInstance(project).getDocument(containingFile)
+                document?.getLineNumber(textRange.startOffset)?.plus(1) ?: 1
             } catch (e: Exception) {
                 1
             }
 
-            // Calculate confidence based on location and symbol type
-            val confidence = calculateSymbolConfidence(element)
-
-            // Create symbol-specific disambiguation hint
-            val disambiguationHint = createDisambiguationHint(element)
-
-            // Check code location flags safely
-            val isTestCode = try {
-                isInTestCode(virtualFile)
-            } catch (e: Exception) {
-                false
-            }
-
-            val isLibraryCode = try {
-                isInLibraryCode(virtualFile, project)
-            } catch (e: Exception) {
-                false
-            }
-
-            // Generate accessibility warning safely
-            val accessibilityWarning = try {
-                getAccessibilityWarning(element)
-            } catch (e: Exception) {
-                null
-            }
+            val elementName = getElementName(element)
+            val elementType = determineJavaScriptElementType(element)
+            val signature = buildJavaScriptSignature(element)
 
             return DefinitionLocation(
-                name = getElementName(element),
+                name = elementName,
                 filePath = relativePath,
-                startOffset = startOffset,
-                endOffset = endOffset,
+                startOffset = textRange.startOffset,
+                endOffset = textRange.endOffset,
                 lineNumber = lineNumber,
-                type = getSymbolKind(element),
-                signature = getSignature(element),
-                containingClass = getContainingClass(element),
-                modifiers = getModifiers(element),
-                isAbstract = isAbstract(element),
-                confidence = confidence,
-                disambiguationHint = disambiguationHint,
-                isTestCode = isTestCode,
-                isLibraryCode = isLibraryCode,
-                accessibilityWarning = accessibilityWarning
+                type = elementType,
+                signature = signature,
+                isTestCode = isInTestCode(virtualFile),
+                isLibraryCode = isInLibraryCode(virtualFile, project),
+                disambiguationHint = generateJavaScriptDisambiguationHint(element, elementType)
             )
+
         } catch (e: Exception) {
-            logger.debug("Error creating location for element", e)
+            logger.warn("Error creating JavaScript location: ${e.message}")
             return null
         }
     }
 
-    private fun calculateSymbolConfidence(element: PsiElement): Float {
-        val baseConfidence = when {
-            isInLibraryCode(element.containingFile.virtualFile, element.project) -> 0.5f
-            isInTestCode(element.containingFile.virtualFile) -> 0.95f
-            else -> 1.0f // Project code
-        }
-
-        // Boost confidence for React-specific symbols
-        val reactBoost = when {
-            isReactComponentElement(element) -> 0.1f
-            isReactHookElement(element) -> 0.1f
-            else -> 0.0f
-        }
-
-        // Boost confidence for JavaScript symbols over CSS
-        val jsBoost = if (isJavaScriptSymbol(element)) 0.1f else 0.0f
-
-        return minOf(1.0f, baseConfidence + reactBoost + jsBoost)
+    private fun isJavaScriptFunction(element: PsiElement): Boolean {
+        val text = element.text.lowercase()
+        return text.contains("function ") || 
+               text.matches(Regex(".*\\w+\\s*\\(.*\\)\\s*=>.*")) ||
+               text.matches(Regex(".*\\w+\\s*\\(.*\\)\\s*\\{.*"))
     }
 
-    private fun createDisambiguationHint(element: PsiElement): String? {
-        return when (element) {
-            is JSFunction -> {
-                val container = PsiTreeUtil.getParentOfType(element, JSClass::class.java)
-                when {
-                    element.isConstructor -> "Constructor in ${container?.name ?: "global"}"
-                    element.isGetProperty -> "Getter in ${container?.name ?: "global"}"
-                    element.isSetProperty -> "Setter in ${container?.name ?: "global"}"
-                    isReactComponentElement(element) -> "React Component Function"
-                    isReactHookElement(element) -> "React Hook"
-                    element.isAsync -> "Async Function"
-                    element.isGenerator -> "Generator Function"
-                    container != null -> "Method in ${container.name}"
-                    else -> "Function"
-                }
-            }
-
-            is JSClass -> {
-                when {
-                    isReactComponentElement(element) -> "React Component Class"
-                    else -> "Class"
-                }
-            }
-
-            is JSVariable -> {
-                when {
-                    element.isConst -> "Constant"
-                    isReactHookElement(element) -> "React Hook Variable"
-                    isReactComponentElement(element) -> "React Component Variable"
-                    else -> "Variable"
-                }
-            }
-
-            is JSProperty -> "Object Property"
-            is JSField -> "Field"
-            else -> element.javaClass.simpleName
-        }
+    private fun isJavaScriptClass(element: PsiElement): Boolean {
+        val text = element.text.lowercase()
+        return text.contains("class ") || text.contains("interface ")
     }
 
-    private fun isReactHookElement(element: PsiElement): Boolean {
-        val name = when (element) {
-            is JSFunction -> element.name
-            is JSVariable -> element.name
-            else -> null
-        }
-        return name != null && isReactHookName(name)
+    private fun isJavaScriptVariable(element: PsiElement): Boolean {
+        val text = element.text.lowercase()
+        return text.contains("var ") || text.contains("let ") || text.contains("const ")
     }
 
-    override fun supportsFile(psiFile: PsiFile): Boolean {
-        val languageId = psiFile.language.id
-        return languageId in setOf("JavaScript", "TypeScript", "JSX", "TSX", "ECMAScript 6")
+    private fun isTypeScriptInterface(element: PsiElement): Boolean {
+        val text = element.text.lowercase()
+        return text.contains("interface ") || text.contains("type ")
     }
 
-    override fun supportsElement(element: PsiElement): Boolean {
-        return element is JSFunction ||
-                element is JSClass ||
-                element is JSVariable ||
-                element is JSField ||
-                element is JSProperty
-    }
-
-    override fun getSupportedLanguage(): String {
-        return "JavaScript/TypeScript"
-    }
-
-    private fun findReference(element: PsiElement): PsiReference? {
-        // Try to get reference from the element or its parent
-        var current: PsiElement? = element
-        while (current != null && current !is PsiFile) {
-            val reference = current.reference
-            if (reference != null) {
-                return reference
-            }
-
-            // Special handling for JSReferenceExpression
-            if (current is JSReferenceExpression) {
-                return current.reference
-            }
-
-            current = current.parent
-        }
-        return null
-    }
-
-    private fun findDefinitionByElement(element: PsiElement): List<DefinitionLocation> {
-        // Handle special cases where we're already at a definition
-        val definitionElement = when (val parent = element.parent) {
-            is JSFunction -> parent
-            is JSClass -> parent
-            is JSVariable -> parent
-            else -> null
-        }
-
-        return if (definitionElement != null) {
-            val location = createLocationSafely(definitionElement, null)
-            if (location != null) listOf(location) else emptyList()
-        } else {
-            emptyList()
-        }
+    private fun isJavaScriptDefinitionElement(element: PsiElement): Boolean {
+        return isJavaScriptFunction(element) || 
+               isJavaScriptClass(element) || 
+               isJavaScriptVariable(element) ||
+               isTypeScriptInterface(element)
     }
 
     private fun getElementName(element: PsiElement): String {
-        return when (element) {
-            is JSFunction -> element.name ?: "anonymous"
-            is JSClass -> element.name ?: "anonymous"
-            is JSVariable -> element.name ?: "anonymous"
-            is JSNamedElement -> element.name ?: "anonymous"
-            is PsiFile -> element.name
-            else -> element.text.take(20)
+        // Try to extract the name from various JavaScript/TypeScript patterns
+        val text = element.text
+        
+        // Function declarations: function name() or const name = () =>
+        val functionMatch = Regex("""(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=|\s*(\w+)\s*\()""")
+            .find(text)
+        if (functionMatch != null) {
+            return functionMatch.groupValues.find { it.isNotBlank() && it != text } ?: "anonymous"
         }
+
+        // Class declarations: class Name
+        val classMatch = Regex("""class\s+(\w+)""").find(text)
+        if (classMatch != null) {
+            return classMatch.groupValues[1]
+        }
+
+        // Interface/Type declarations: interface Name or type Name
+        val typeMatch = Regex("""(?:interface|type)\s+(\w+)""").find(text)
+        if (typeMatch != null) {
+            return typeMatch.groupValues[1]
+        }
+
+        // Variable declarations: var/let/const name
+        val varMatch = Regex("""(?:var|let|const)\s+(\w+)""").find(text)
+        if (varMatch != null) {
+            return varMatch.groupValues[1]
+        }
+
+        // Fallback to element text or "unknown"
+        return (element as? PsiNamedElement)?.name 
+            ?: element.text.take(50).trim()
+            ?: "unknown"
     }
 
-    private fun getContainingClass(element: PsiElement): String? {
-        val containingClass = PsiTreeUtil.getParentOfType(element, JSClass::class.java)
-        return containingClass?.name
-    }
-
-    private fun getSymbolKind(element: PsiElement): String {
-        return when (element) {
-            is JSFunction -> when {
-                element.isConstructor -> "constructor"
-                element.isAsync -> "async_function"
-                element.isGenerator -> "generator_function"
-                isReactComponentElement(element) -> "component"
-                isReactHookElement(element) -> "hook"
-                else -> "function"
+    private fun determineJavaScriptElementType(element: PsiElement): String {
+        return when {
+            isJavaScriptFunction(element) -> "function"
+            isJavaScriptClass(element) -> {
+                if (element.text.lowercase().contains("interface")) "interface" else "class"
             }
-
-            is JSClass -> when {
-                isReactComponentElement(element) -> "component"
-                else -> "class"
+            isJavaScriptVariable(element) -> {
+                when {
+                    element.text.contains("const") -> "constant"
+                    element.text.contains("let") -> "variable"
+                    element.text.contains("var") -> "variable"
+                    else -> "variable"
+                }
             }
-
-            is JSVariable -> when {
-                element.isConst -> "constant"
-                isReactHookElement(element) -> "hook"
-                isReactComponentElement(element) -> "component"
-                else -> "variable"
+            isTypeScriptInterface(element) -> {
+                if (element.text.lowercase().contains("type")) "type" else "interface"
             }
-
-            is JSProperty -> "property"
-            is JSField -> "field"
             else -> "unknown"
         }
     }
 
-    private fun getSignature(element: PsiElement): String? {
-        return when (element) {
-            is JSFunction -> buildFunctionSignature(element)
-            is JSClass -> buildClassSignature(element)
-            is JSVariable -> buildVariableSignature(element)
-            else -> null
-        }
-    }
-
-    private fun buildFunctionSignature(function: JSFunction): String {
+    private fun buildJavaScriptSignature(element: PsiElement): String? {
         return try {
-            val params = function.parameters.joinToString(", ") { param ->
-                val type = param.typeElement?.text ?: "any"
-                "${param.name ?: "param"}: $type"
-            }
-            val name = function.name ?: "anonymous"
-            val returnType = function.returnTypeElement?.text?.let { ": $it" } ?: ""
-            val asyncModifier = if (function.isAsync) "async " else ""
-            val generatorModifier = if (function.isGenerator) "* " else ""
-            "$asyncModifier${generatorModifier}function $name($params)$returnType"
-        } catch (e: Exception) {
-            function.name ?: "anonymous function"
-        }
-    }
-
-    private fun buildClassSignature(jsClass: JSClass): String {
-        return try {
-            val name = jsClass.name ?: "anonymous"
-            val superClass = jsClass.superClasses.firstOrNull()?.name
-            val extendsClause = superClass?.let { " extends $it" } ?: ""
-            "class $name$extendsClause"
-        } catch (e: Exception) {
-            jsClass.name ?: "anonymous class"
-        }
-    }
-
-    private fun buildVariableSignature(variable: JSVariable): String {
-        return try {
-            val name = variable.name ?: "anonymous"
-            val type = variable.typeElement?.text?.let { ": $it" } ?: ""
-            val kind = if (variable.isConst) "const" else "let"
-            "$kind $name$type"
-        } catch (e: Exception) {
-            variable.name ?: "anonymous variable"
-        }
-    }
-
-    private fun getModifiers(element: PsiElement): List<String> {
-        val modifiers = mutableListOf<String>()
-
-        try {
-            when (element) {
-                is JSFunction -> {
-                    if (element.isAsync) modifiers.add("async")
-                    if (element.isGenerator) modifiers.add("generator")
-                    if (isStaticMember(element)) modifiers.add("static")
-                    if (isExported(element)) modifiers.add("export")
-                }
-
-                is JSClass -> {
-                    if (isExported(element)) modifiers.add("export")
-                }
-
-                is JSVariable -> {
-                    if (element.isConst) modifiers.add("const")
-                    if (isExported(element)) modifiers.add("export")
-                }
-            }
-        } catch (e: Exception) {
-            // Silent fallback
-        }
-
-        return modifiers
-    }
-
-    private fun getAccessibilityWarning(element: PsiElement): String? {
-        return try {
-            // Check if the element is private and being accessed from outside
-            if (element is JSAttributeListOwner &&
-                element.attributeList?.text?.contains("private") == true
-            ) {
-                return "Private member - not accessible from outside its class"
-            }
-
-            // Check for TypeScript private members
-            if (element.text.contains("private ")) {
-                return "Private member - not accessible from outside its class"
-            }
-
-            null
+            val text = element.text.lines().firstOrNull()?.take(100)?.trim()
+            text
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun isStaticMember(element: PsiElement): Boolean {
+    private fun generateJavaScriptDisambiguationHint(element: PsiElement, elementType: String): String? {
         return try {
-            element is JSAttributeListOwner &&
-                    element.attributeList?.text?.contains("static") == true
+            val containingFile = element.containingFile
+            val fileName = containingFile?.name ?: "unknown file"
+            val languageId = element.language.id
+            
+            when (elementType) {
+                "function" -> {
+                    if (element.text.contains("=>")) {
+                        "Arrow function in $fileName"
+                    } else {
+                        "$languageId function in $fileName"
+                    }
+                }
+                "class" -> "$languageId class in $fileName"
+                "interface" -> "TypeScript interface in $fileName"
+                "type" -> "TypeScript type in $fileName"
+                "constant" -> "Constant in $fileName"
+                "variable" -> "Variable in $fileName"
+                else -> "$languageId element in $fileName"
+            }
         } catch (e: Exception) {
-            false
+            null
         }
     }
 
-    private fun isExported(element: PsiElement): Boolean {
+    private fun calculateJavaScriptConfidence(element: PsiElement, searchTerm: String): Float {
         return try {
-            element.text.startsWith("export") || element.parent?.text?.startsWith("export") == true
+            val elementName = getElementName(element)
+            val containingFile = element.containingFile
+            val virtualFile = containingFile?.virtualFile
+            val project = element.project
+
+            val isInLibrary = try {
+                virtualFile?.let { isInLibraryCode(it, project) } ?: false
+            } catch (e: Exception) {
+                false
+            }
+
+            when {
+                // Exact name match in project code
+                elementName == searchTerm && !isInLibrary -> 1.0f
+                // Exact name match in library code  
+                elementName == searchTerm && isInLibrary -> 0.5f
+                // Case-insensitive match
+                elementName.equals(searchTerm, ignoreCase = true) -> 0.7f
+                // Partial match
+                elementName.contains(searchTerm, ignoreCase = true) -> 0.3f
+                else -> 0.1f
+            }
         } catch (e: Exception) {
-            false
+            0.1f
         }
     }
 
-    private fun isAbstract(element: PsiElement): Boolean {
-        return try {
-            element.text.contains("abstract ")
-        } catch (e: Exception) {
-            false
-        }
+    override fun createLocation(element: PsiElement, searchTerm: String?): DefinitionLocation {
+        return createJavaScriptLocation(element) ?: createFallbackLocation(element, searchTerm)
+    }
+
+    private fun createFallbackLocation(element: PsiElement, searchTerm: String?): DefinitionLocation {
+        val containingFile = element.containingFile
+        val virtualFile = containingFile?.virtualFile
+        val textRange = element.textRange
+        
+        return DefinitionLocation(
+            name = getElementName(element),
+            filePath = virtualFile?.name ?: "unknown",
+            startOffset = textRange?.startOffset ?: 0,
+            endOffset = textRange?.endOffset ?: 0,
+            lineNumber = 1,
+            type = "unknown",
+            signature = element.text?.lines()?.firstOrNull()?.take(100),
+            isTestCode = false,
+            isLibraryCode = false,
+            confidence = 0.1f,
+            disambiguationHint = "JavaScript/TypeScript element"
+        )
+    }
+
+    override fun supportsElement(element: PsiElement): Boolean {
+        return LanguageUtils.isJavaScriptOrTypeScript(element.language)
+    }
+
+    override fun supportsFile(psiFile: PsiFile): Boolean {
+        return LanguageUtils.isJavaScriptOrTypeScript(psiFile.language)
+    }
+
+    override fun getSupportedLanguage(): String {
+        return "JavaScript/TypeScript"
     }
 }

@@ -1,16 +1,16 @@
 <!-- JavaScript/TypeScript-specific services registration -->
 <idea-plugin>
   <extensions defaultExtensionNs="com.intellij">
-    <applicationService
+    <projectService
             serviceInterface="dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor"
             serviceImplementation="dev.mcp.extensions.lsp.languages.javascript.JavaScriptSymbolExtractor"/>
-    <applicationService
+    <projectService
             serviceInterface="dev.mcp.extensions.lsp.core.interfaces.DefinitionFinder"
             serviceImplementation="dev.mcp.extensions.lsp.languages.javascript.JavaScriptDefinitionFinder"/>
-    <applicationService
+    <projectService
             serviceInterface="dev.mcp.extensions.lsp.core.interfaces.ReferenceFinder"
             serviceImplementation="dev.mcp.extensions.lsp.languages.javascript.JavaScriptReferenceFinder"/>
-    <applicationService
+    <projectService
             serviceInterface="dev.mcp.extensions.lsp.core.interfaces.HoverInfoProvider"
             serviceImplementation="dev.mcp.extensions.lsp.languages.javascript.JavaScriptHoverInfoProvider"/>
   </extensions>

@@ -6,6 +6,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import dev.mcp.extensions.lsp.core.interfaces.HoverInfoProvider
 import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils
 
 /**
  * Factory for creating language-specific hover info providers.
@@ -15,7 +16,7 @@ object HoverInfoProviderFactory {
     private val logger = Logger.getInstance(HoverInfoProviderFactory::class.java)
 
     // Service class names - no direct imports needed
-    private const val JAVA_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.java.JavaHoverInfoProvider"
+    private const val JVM_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.jvm.JvmHoverInfoProvider"
     private const val PYTHON_HOVER_INFO_PROVIDER = "dev.mcp.extensions.lsp.languages.python.PythonHoverInfoProvider"
     private const val JAVASCRIPT_HOVER_INFO_PROVIDER =
         "dev.mcp.extensions.lsp.languages.javascript.JavaScriptHoverInfoProvider"
@@ -52,17 +53,17 @@ object HoverInfoProviderFactory {
 
         // Try to get language-specific service using dynamic loading
         val provider = when {
-            isJavaOrKotlin(language) -> {
-                logger.debug("Looking for Java/Kotlin hover info provider service")
-                DynamicServiceLoader.loadHoverInfoProvider(JAVA_HOVER_INFO_PROVIDER)
+            LanguageUtils.isJvmLanguage(language) -> {
+                logger.info("Using JVM implementation for $languageId")
+                DynamicServiceLoader.loadHoverInfoProvider(JVM_HOVER_INFO_PROVIDER)
             }
 
-            isPython(language) -> {
+            LanguageUtils.isPython(language) -> {
                 logger.debug("Looking for Python hover info provider service")
                 DynamicServiceLoader.loadHoverInfoProvider(PYTHON_HOVER_INFO_PROVIDER)
             }
 
-            isJavaScriptOrTypeScript(language) -> {
+            LanguageUtils.isJavaScriptOrTypeScript(language) -> {
                 logger.debug("Looking for JavaScript/TypeScript hover info provider service")
                 DynamicServiceLoader.loadHoverInfoProvider(JAVASCRIPT_HOVER_INFO_PROVIDER)
             }
@@ -75,46 +76,10 @@ object HoverInfoProviderFactory {
             return provider
         }
 
-        // Provide helpful error message based on language
-        val errorMessage = when {
-            isPython(language) -> {
-                "Python support is not available in this IDE. " +
-                        "Python is supported in PyCharm or IntelliJ IDEA Ultimate with the Python plugin installed."
-            }
-
-            isJavaOrKotlin(language) -> {
-                "Java/Kotlin support should be available but the service failed to load. " +
-                        "Please restart the IDE or reinstall the plugin."
-            }
-
-            isJavaScriptOrTypeScript(language) -> {
-                "JavaScript/TypeScript support is not available in this IDE. " +
-                        "JavaScript/TypeScript is supported in WebStorm or IntelliJ IDEA Ultimate with the JavaScript plugin installed."
-            }
-
-            else -> {
-                "Language not supported: $languageName (id: $languageId)"
-            }
-        }
+        // Use centralized error message generation
+        val errorMessage = LanguageUtils.getUnsupportedLanguageMessage(language)
 
         logger.warn("No hover info provider available: $errorMessage")
         throw UnsupportedOperationException(errorMessage)
-    }
-
-    private fun isJavaOrKotlin(language: Language): Boolean {
-        val id = language.id
-        return id == "JAVA" || id == "kotlin" || id == "Kotlin"
-    }
-
-    private fun isPython(language: Language): Boolean {
-        val id = language.id
-        return id == "Python" || id == "PythonCore"
-    }
-
-    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
-        val id = language.id
-        return id == "JavaScript" || id == "TypeScript" ||
-                id == "JSX" || id == "TSX" ||
-                id == "ECMAScript 6"
     }
 }

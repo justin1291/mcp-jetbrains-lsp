@@ -143,7 +143,7 @@ class JavaScriptReferenceFinder : BaseLanguageHandler(), ReferenceFinder {
                 (element is PsiFile && supportsFile(element))
     }
 
-    private fun supportsFile(psiFile: PsiFile): Boolean {
+    override fun supportsFile(psiFile: PsiFile): Boolean {
         val languageId = psiFile.language.id
         return languageId in setOf("JavaScript", "TypeScript", "JSX", "TSX", "ECMAScript 6")
     }
