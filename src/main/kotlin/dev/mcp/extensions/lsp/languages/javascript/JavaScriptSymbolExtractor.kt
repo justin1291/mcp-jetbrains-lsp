@@ -615,7 +615,12 @@ class JavaScriptSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
 
     override fun supportsFile(psiFile: PsiFile): Boolean {
         val languageId = psiFile.language.id
-        return languageId in setOf("JavaScript", "TypeScript", "JSX", "TSX", "ECMAScript 6")
+        return languageId in setOf(
+            "JavaScript", "TypeScript", 
+            "JSX", "TSX", 
+            "TypeScript JSX", "JavaScript JSX", // Support for React files
+            "ECMAScript 6"
+        )
     }
 
     override fun getSupportedLanguage(): String {
@@ -728,22 +733,60 @@ class JavaScriptSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
         return when (element) {
             is JSFunction -> {
                 val functionName = element.name
-                functionName != null && functionName.isNotEmpty() && functionName[0].isUpperCase() && hasJSXInBody(element)
+                if (functionName == null || functionName.isEmpty() || !functionName[0].isUpperCase()) {
+                    return false
+                }
+                
+                // Check if it actually uses JSX or has React patterns
+                return hasReactPatterns(element)
             }
 
             is JSVariable -> {
                 val variableName = element.name
-                variableName != null && variableName.isNotEmpty() && variableName[0].isUpperCase() &&
-                        element.initializer?.text?.contains("React") == true
+                if (variableName == null || variableName.isEmpty() || !variableName[0].isUpperCase()) {
+                    return false
+                }
+                
+                // Check if the initializer has React patterns
+                val initializer = element.initializer
+                return initializer != null && hasReactPatterns(initializer)
             }
 
             is JSClass -> {
                 val className = element.name
-                className != null && className.isNotEmpty() && className[0].isUpperCase()
+                if (className == null || className.isEmpty() || !className[0].isUpperCase()) {
+                    return false
+                }
+                
+                // Check if it extends React.Component or has React patterns
+                return hasReactPatterns(element)
             }
 
             else -> false
         }
+    }
+
+    /**
+     * Check if an element has React patterns (JSX usage, React imports, etc.)
+     */
+    private fun hasReactPatterns(element: PsiElement): Boolean {
+        val containingFile = element.containingFile
+        val fileText = containingFile?.text ?: return false
+        
+        // Check for React imports
+        val hasReactImport = fileText.contains("import React") || 
+                            fileText.contains("import * as React") ||
+                            fileText.contains("from 'react'") ||
+                            fileText.contains("from \"react\"")
+        
+        if (!hasReactImport) {
+            return false
+        }
+        
+        // Check for JSX usage in the element's text
+        val elementText = element.text
+        return elementText.contains("<") && elementText.contains(">") && 
+               (elementText.contains("</") || elementText.contains("/>"))
     }
 
     private fun isReactHook(element: PsiElement): Boolean {
@@ -753,11 +796,6 @@ class JavaScriptSymbolExtractor : BaseLanguageHandler(), SymbolExtractor {
             else -> null
         }
         return elementName != null && elementName.startsWith("use") && elementName.length > 3 && elementName[3].isUpperCase()
-    }
-
-    private fun hasJSXInBody(function: JSFunction): Boolean {
-        val functionBodyText = function.block?.text ?: ""
-        return functionBodyText.contains("<") && functionBodyText.contains("/>")
     }
 
     private fun hasDeprecatedAnnotation(element: PsiElement): Boolean {

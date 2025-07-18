@@ -22,10 +22,8 @@ export function capitalize(str) {
  */
 export const toCamelCase = (str) => {
     return str
-        .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => {
-            return index === 0 ? word.toLowerCase() : word.toUpperCase();
-        })
-        .replace(/\s+/g, '');
+        .replace(/\W+(.)/g, (_, char) => char.toUpperCase())
+        .replace(/^(.)/, char => char.toLowerCase());
 };
 
 /**
@@ -130,7 +128,7 @@ export class StringFormatter {
  * @returns {string} Processed string
  */
 export const processTemplate = (template, values) => {
-    return template.replace(/\{(\w+)\}/g, (match, key) => {
+    return template.replace(/{(\w+)}/g, (match, key) => {
         return values.hasOwnProperty(key) ? values[key] : match;
     });
 };
@@ -153,7 +151,7 @@ export const STRING_CONSTANTS = {
  */
 export const REGEX_PATTERNS = {
     EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-    PHONE: /^\+?[\d\s\-\(\)]+$/,
+    PHONE: /^\+?[\d\s\-()]+$/,
     URL: /^https?:\/\/.+$/,
     NUMBER: /^\d+$/,
     ALPHANUMERIC: /^[a-zA-Z0-9]+$/,

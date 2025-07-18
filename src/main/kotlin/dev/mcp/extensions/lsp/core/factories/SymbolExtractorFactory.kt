@@ -5,6 +5,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.psi.PsiFile
 import dev.mcp.extensions.lsp.core.interfaces.SymbolExtractor
 import dev.mcp.extensions.lsp.core.utils.DynamicServiceLoader
+import dev.mcp.extensions.lsp.core.utils.LanguageUtils
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -15,7 +16,7 @@ object SymbolExtractorFactory {
     private val logger = Logger.getInstance(SymbolExtractorFactory::class.java)
 
     // Service class names - no direct imports needed
-    private const val JAVA_SYMBOL_EXTRACTOR = "dev.mcp.extensions.lsp.languages.java.JavaSymbolExtractor"
+    private const val JVM_SYMBOL_EXTRACTOR = "dev.mcp.extensions.lsp.languages.jvm.JvmSymbolExtractor"
     private const val PYTHON_SYMBOL_EXTRACTOR = "dev.mcp.extensions.lsp.languages.python.PythonSymbolExtractor"
     private const val JAVASCRIPT_SYMBOL_EXTRACTOR =
         "dev.mcp.extensions.lsp.languages.javascript.JavaScriptSymbolExtractor"
@@ -41,50 +42,40 @@ object SymbolExtractorFactory {
 
         // Try to get language-specific service using dynamic loading
         val extractor = when {
-            isJavaOrKotlin(language) -> {
-                logger.debug("Looking for Java/Kotlin symbol extractor service")
-                DynamicServiceLoader.loadSymbolExtractor(JAVA_SYMBOL_EXTRACTOR)
+            LanguageUtils.isJvmLanguage(language) -> {
+                logger.info("Using JVM implementation for $languageId")
+                DynamicServiceLoader.loadSymbolExtractor(JVM_SYMBOL_EXTRACTOR)
             }
 
-            isPython(language) -> {
+            LanguageUtils.isPython(language) -> {
                 logger.debug("Looking for Python symbol extractor service")
                 DynamicServiceLoader.loadSymbolExtractor(PYTHON_SYMBOL_EXTRACTOR)
             }
 
-            isJavaScriptOrTypeScript(language) -> {
+            LanguageUtils.isJavaScriptOrTypeScript(language) -> {
                 logger.debug("Looking for JavaScript/TypeScript symbol extractor service")
                 DynamicServiceLoader.loadSymbolExtractor(JAVASCRIPT_SYMBOL_EXTRACTOR)
             }
 
-            else -> null
+            else -> {
+                logger.debug("No language match found for '$languageId'")
+                null
+            }
         }
 
         if (extractor != null) {
-            logger.info("Found symbol extractor for $languageName")
-            return extractor
-        }
-
-        // Provide helpful error message based on language
-        val errorMessage = when {
-            isPython(language) -> {
-                "Python support is not available in this IDE. " +
-                        "Python is supported in PyCharm or IntelliJ IDEA Ultimate with the Python plugin installed."
-            }
-
-            isJavaOrKotlin(language) -> {
-                "Java/Kotlin support should be available but the service failed to load. " +
-                        "Please restart the IDE or reinstall the plugin."
-            }
-
-            isJavaScriptOrTypeScript(language) -> {
-                "JavaScript/TypeScript support is not available in this IDE. " +
-                        "JavaScript/TypeScript is supported in WebStorm or IntelliJ IDEA Ultimate with the JavaScript plugin installed."
-            }
-
-            else -> {
-                "Language not supported: $languageName (id: $languageId)"
+            logger.info("Found symbol extractor for $languageName: ${extractor.javaClass.name}")
+            // Additional check if the extractor supports the specific file
+            if (extractor.supportsFile(psiFile)) {
+                logger.debug("Extractor confirms support for file")
+                return extractor
+            } else {
+                logger.warn("Extractor does not support this specific file")
             }
         }
+
+        // Use centralized error message generation
+        val errorMessage = LanguageUtils.getUnsupportedLanguageMessage(language)
 
         logger.warn("No symbol extractor available: $errorMessage")
         throw UnsupportedOperationException(errorMessage)
@@ -110,7 +101,7 @@ object SymbolExtractorFactory {
         symbolTypes.addAll(coreLspTypes)
 
         // Collect types from each available language implementation with all framework types included
-        listOf(JAVA_SYMBOL_EXTRACTOR, JAVASCRIPT_SYMBOL_EXTRACTOR, PYTHON_SYMBOL_EXTRACTOR).forEach { className ->
+        listOf(JVM_SYMBOL_EXTRACTOR, JAVASCRIPT_SYMBOL_EXTRACTOR, PYTHON_SYMBOL_EXTRACTOR).forEach { className ->
             try {
                 val extractor = DynamicServiceLoader.loadSymbolExtractor(className)
                 if (extractor != null) {
@@ -162,7 +153,7 @@ object SymbolExtractorFactory {
             symbolTypes.addAll(coreLspTypes)
 
             // Collect types from each available language implementation
-            listOf(JAVA_SYMBOL_EXTRACTOR, JAVASCRIPT_SYMBOL_EXTRACTOR, PYTHON_SYMBOL_EXTRACTOR).forEach { className ->
+            listOf(JVM_SYMBOL_EXTRACTOR, JAVASCRIPT_SYMBOL_EXTRACTOR, PYTHON_SYMBOL_EXTRACTOR).forEach { className ->
                 try {
                     val extractor = DynamicServiceLoader.loadSymbolExtractor(className)
                     if (extractor != null) {
@@ -188,57 +179,25 @@ object SymbolExtractorFactory {
         allSymbolsCache = null
         logger.debug("Symbol type cache cleared")
     }
-
+    
     /**
-     * Check if a language is Java or Kotlin.
-     */
-    private fun isJavaOrKotlin(language: Language): Boolean {
-        val id = language.id
-        return id == "JAVA" || id == "kotlin" || id == "Kotlin"
-    }
-
-    /**
-     * Check if a language is Python.
-     */
-    private fun isPython(language: Language): Boolean {
-        val id = language.id
-        // without the python plugin "Text" will be the detected language
-        return id == "Python" || id == "PythonCore"
-    }
-
-    /**
-     * Check if a language is JavaScript or TypeScript.
-     */
-    private fun isJavaScriptOrTypeScript(language: Language): Boolean {
-        val id = language.id
-        return id == "JavaScript" || id == "TypeScript" ||
-                id == "JSX" || id == "TSX" ||
-                id == "ECMAScript 6"
-    }
-
-    /**
-     * Get list of supported languages based on available services.
+     * Get all supported languages from available extractors.
      */
     fun getSupportedLanguages(): List<String> {
         val languages = mutableListOf<String>()
-
-        // Check if Java service is available
-        if (DynamicServiceLoader.isSymbolExtractorAvailable(JAVA_SYMBOL_EXTRACTOR)) {
-            languages.add("Java")
-            languages.add("Kotlin")
+        
+        // Try to load each extractor and get its supported language
+        listOf(JVM_SYMBOL_EXTRACTOR, PYTHON_SYMBOL_EXTRACTOR, JAVASCRIPT_SYMBOL_EXTRACTOR).forEach { className ->
+            try {
+                val extractor = DynamicServiceLoader.loadSymbolExtractor(className)
+                if (extractor != null) {
+                    languages.add(extractor.getSupportedLanguage())
+                }
+            } catch (e: Exception) {
+                logger.debug("Could not load extractor $className: ${e.message}")
+            }
         }
-
-        // Check if Python service is available
-        if (DynamicServiceLoader.isSymbolExtractorAvailable(PYTHON_SYMBOL_EXTRACTOR)) {
-            languages.add("Python")
-        }
-
-        // Check if JavaScript service is available
-        if (DynamicServiceLoader.isSymbolExtractorAvailable(JAVASCRIPT_SYMBOL_EXTRACTOR)) {
-            languages.add("JavaScript")
-            languages.add("TypeScript")
-        }
-
-        return languages
+        
+        return languages.distinct()
     }
 }

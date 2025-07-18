@@ -82,7 +82,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            v1.1.0: Add javascript support
+            v1.1.1: Improve all jvm language support
         """.trimIndent()
     }
 
@@ -125,6 +125,11 @@ powerAssert {
         "kotlin.test.assertEquals",
         "kotlin.test.assertNotNull",
         "kotlin.test.assertNull",
+        "junit.framework.TestCase.assertTrue",
+        "junit.framework.TestCase.assertFalse",
+        "junit.framework.TestCase.assertEquals",
+        "junit.framework.TestCase.assertNotNull",
+        "junit.framework.TestCase.assertNull",
         "com.intellij.testFramework.assertTrue",
         "com.intellij.testFramework.assertFalse",
         "com.intellij.testFramework.assertEquals",

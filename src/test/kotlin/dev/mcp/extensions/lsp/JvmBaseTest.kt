@@ -19,7 +19,7 @@ import java.io.File
  */
 @RunWith(JUnit4::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-abstract class JavaBaseTest : HeavyPlatformTestCase() {
+abstract class JvmBaseTest : HeavyPlatformTestCase() {
 
     protected lateinit var myFixture: CodeInsightTestFixture
 

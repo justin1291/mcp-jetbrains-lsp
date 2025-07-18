@@ -50,16 +50,19 @@ object DynamicServiceLoader {
                         try {
                             val service = iterator.next()
                             services.add(service)
-                            logger.debug("Loaded service: ${service.javaClass.name}")
+                            logger.info("Successfully loaded service: ${service.javaClass.name}")
                         } catch (e: ServiceConfigurationError) {
                             // This happens when a service implementation can't be instantiated
                             // (e.g., Python classes when Python plugin is not installed)
-                            logger.debug("Failed to load service implementation: ${e.message}")
+                            logger.warn("Failed to load service implementation: ${e.message}")
+                            logger.debug("ServiceConfigurationError details", e)
                         } catch (e: NoClassDefFoundError) {
                             // This happens when required classes (like Python PSI) are missing
-                            logger.debug("Service implementation requires unavailable classes: ${e.message}")
+                            logger.warn("Service implementation requires unavailable classes: ${e.message}")
+                            logger.debug("NoClassDefFoundError details", e)
                         } catch (e: Exception) {
-                            logger.debug("Unexpected error loading service: ${e.message}")
+                            logger.warn("Unexpected error loading service: ${e.message}")
+                            logger.debug("Exception details", e)
                         }
                     }
                 } finally {
@@ -103,15 +106,22 @@ object DynamicServiceLoader {
      * Returns the first matching implementation or null if not found.
      */
     fun <T : Any> loadService(serviceInterface: Class<T>, implementationClassName: String): T? {
+        logger.debug("Loading service: $implementationClassName for interface: ${serviceInterface.name}")
         val services = loadServices(serviceInterface)
-        return services.firstOrNull { it.javaClass.name == implementationClassName }
+        logger.debug("Available services: ${services.map { it.javaClass.name }}")
+        val result = services.firstOrNull { it.javaClass.name == implementationClassName }
+        logger.debug("Service match result: $result")
+        return result
     }
 
     /**
      * Load a SymbolExtractor implementation by class name.
      */
     fun loadSymbolExtractor(className: String): SymbolExtractor? {
-        return loadService(SymbolExtractor::class.java, className)
+        logger.debug("Attempting to load SymbolExtractor: $className")
+        val result = loadService(SymbolExtractor::class.java, className)
+        logger.debug("SymbolExtractor load result: $result")
+        return result
     }
 
     /**

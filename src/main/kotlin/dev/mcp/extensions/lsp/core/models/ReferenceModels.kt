@@ -45,7 +45,8 @@ data class ReferenceInfo(
     val accessModifier: String? = null,
     val surroundingContext: String? = null,
     val dataFlowContext: String? = null,
-    val isInDeprecatedCode: Boolean = false
+    val isInDeprecatedCode: Boolean = false,
+    val languageFeatures: Map<String, String>? = null
 )
 
 /**
