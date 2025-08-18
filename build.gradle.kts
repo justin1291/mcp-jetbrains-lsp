@@ -6,7 +6,7 @@ import java.util.*
 plugins {
     id("java")
     kotlin("jvm") version "2.2.0"
-    id("org.jetbrains.intellij.platform") version "2.6.0"
+    id("org.jetbrains.intellij.platform") version "2.7.2"
     kotlin("plugin.serialization") version "2.2.0"
     kotlin("plugin.power-assert") version "2.1.0"
 }
